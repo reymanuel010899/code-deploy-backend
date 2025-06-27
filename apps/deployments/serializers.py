@@ -1,0 +1,127 @@
+from rest_framework import serializers
+from .models import DockerImage, Deployment
+
+class DockerImageSerializer(serializers.ModelSerializer):
+    full_image_name = serializers.CharField(read_only=True)
+    
+    class Meta:
+        model = DockerImage
+        fields = ['id', 'name', 'tag', 'registry_url', 'repository_name', 
+                 'full_image_name', 'created_at']
+        read_only_fields = ['created_at']
+
+
+
+
+class DockerImageSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    tag = serializers.CharField(required=False)
+
+class ECSConfigSerializer(serializers.Serializer):
+    clusterName = serializers.CharField()
+    # serviceName = serializers.CharField()
+    # taskDefinitionFamily = serializers.CharField()
+    taskCpu = serializers.IntegerField()
+    taskMemory = serializers.IntegerField()
+    desiredCount = serializers.IntegerField()
+    loadBalancer = serializers.BooleanField()
+    autoScaling = serializers.BooleanField()
+    minCapacity = serializers.IntegerField()
+    maxCapacity = serializers.IntegerField()
+    networkMode = serializers.CharField()
+    platformVersion = serializers.CharField()
+    assignPublicIp = serializers.BooleanField()
+    subnets = serializers.ListField(child=serializers.CharField())
+    securityGroups = serializers.ListField(child=serializers.CharField())
+    containerPort = serializers.IntegerField()
+    protocol = serializers.CharField()
+    essential = serializers.BooleanField()
+    logGroup = serializers.CharField()
+    logRegion = serializers.CharField()
+    logStreamPrefix = serializers.CharField()
+    environmentVariables = serializers.ListField(child=serializers.DictField(), required=False)
+    secrets = serializers.ListField(child=serializers.DictField(), required=False)
+    healthCheckEnabled = serializers.BooleanField()
+    healthCheckPath = serializers.CharField()
+    healthCheckInterval = serializers.IntegerField()
+    healthCheckTimeout = serializers.IntegerField()
+    healthCheckRetries = serializers.IntegerField()
+
+
+class DeploymentCreateSerializer(serializers.Serializer):
+    service = serializers.CharField()
+    docker_images = serializers.ListField(child=serializers.DictField())
+    ecs_config = ECSConfigSerializer()
+
+    def create(self, validated_data):
+        ecs_data = validated_data.pop('ecs_config')
+        docker_images = validated_data.pop('docker_images')
+        user = self.context['request'].user
+
+        deployment = Deployment.objects.create(
+            user=user,
+            aws_cluster_arn=ecs_data.get('clusterName'),
+            name=ecs_data.get('clusterName') + "-deploy",
+            cpu_units=ecs_data.get('taskCpu'),
+            memory_mb=ecs_data.get('taskMemory'),
+            docker_images=docker_images,
+        )
+        deployment.save()
+        print("Deployment created with ID:", deployment.docker_images)
+        return deployment
+
+
+class DeploymentUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Deployment
+        fields = [
+            'cpu_units', 'memory_mb', 'command', 'entrypoint',
+            'port_mappings', 'environment_variables', 'secrets',
+            'volumes', 'health_check', 'desired_count', 'min_count',
+            'max_count'
+        ]
+
+class DeploymentDetailSerializer(serializers.ModelSerializer):
+    docker_image = DockerImageSerializer(read_only=True)
+    status_details = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Deployment
+        fields = [
+            'id', 'name', 'docker_image', 'status', 'status_details',
+            'created_at', 'updated_at', 'cpu_units', 'memory_mb',
+            'container_name', 'command', 'entrypoint', 'port_mappings',
+            'network_mode', 'environment_variables', 'secrets',
+            'volumes', 'health_check', 'desired_count', 'min_count',
+            'max_count'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'status', 'status_details']
+    
+    def get_status_details(self, obj):
+        from .services import DeploymentService
+        try:
+            deployment_service = DeploymentService()
+            return deployment_service.get_deployment_status(obj)
+        except Exception:
+            return None
+
+class DeploymentListSerializer(serializers.ModelSerializer):
+    docker_image = DockerImageSerializer(read_only=True)
+    status_details = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Deployment
+        fields = [
+            'id', 'name', 'docker_image', 'status', 'status_details',
+            'created_at', 'updated_at', 'cpu_units', 'memory_mb',
+            'desired_count'
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'status', 'status_details']
+    
+    def get_status_details(self, obj):
+        from .services import DeploymentService
+        try:
+            deployment_service = DeploymentService()
+            return deployment_service.get_deployment_status(obj)
+        except Exception:
+            return None 

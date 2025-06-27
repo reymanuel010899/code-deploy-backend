@@ -1,0 +1,148 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Fargate Cluster usando VPC y subnets existentes
+
+Parameters:
+  VPCId:
+    Type: String
+    Default: vpc-0d1125fbea39e69f4
+
+  PublicSubnetId:
+    Type: String
+    Default: subnet-08739eb429d2fabe8
+
+  PrivateSubnetId:
+    Type: String
+    Default: subnet-02ad64779efe7a82d
+
+  ClusterName:
+    Type: String
+    Description: Nombre de la definición de tarea
+
+  TaskName:
+    Type: String
+    Description: Nombre de la definición de tarea
+
+  Image1:
+    Type: String
+    Description: Imagen contenedor 1
+
+  Image2:
+    Type: String
+    Description: Imagen contenedor 2
+
+  Image3:
+    Type: String
+    Description: Imagen contenedor 3
+
+  Cpu:
+    Type: String
+    AllowedValues: ['256', '512', '1024', '2048', '4096']
+    Description: CPU para la tarea
+
+  Memory:
+    Type: String
+    AllowedValues: ['512', '1024', '2048', '3072', '4096', '5120', '6144', '7168', '8192']
+    Description: RAM (en MB) para la tarea
+
+  App1Port:
+    Type: Number
+    Description: Puerto para el contenedor 1
+
+  App2Port:
+    Type: Number
+    Description: Puerto para el contenedor 2
+
+  App3Port:
+    Type: Number
+    Description: Puerto para el contenedor 3
+
+Resources:
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup  
+    Properties:
+        GroupDescription: Allow HTTP Traffic
+        VpcId: !Ref VPCId
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 80
+            ToPort: 80
+            CidrIp: 0.0.0.0/0
+
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ecsTaskExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: mi-task-def
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt ECSExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: WebServer
+          Image: !Ref  Image1
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref App1Port
+              Protocol: tcp
+
+        - Name: Website
+          Essential: true
+          Image: !Ref Image2
+          PortMappings:
+            - ContainerPort: !Ref App2Port
+              Protocol: tcp
+
+        - Name: DataBase
+          Essential: true
+          Image: !Ref Image3
+          PortMappings:
+            - ContainerPort: !Ref App3Port
+              Protocol: tcp
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: ECSCluster
+    Properties:
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      DesiredCount: 3
+      TaskDefinition: !Ref TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref PublicSubnetId
+          SecurityGroups:
+            - !Ref InstanceSecurityGroup
+
+Outputs:
+  ServiceCluster:
+    Description: Nombre del cluster ECS creado
+    Value: !Ref ECSCluster
+
+  ECSServiceName:
+    Description: Nombre del servicio ECS creado
+    Value: !Ref ECSService
