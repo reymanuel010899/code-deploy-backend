@@ -87,6 +87,25 @@ Parameters:
     Type: Number
     Description: Puerto para el contenedor 3
 
+  DatabaseEngine:
+    Type: String
+    Default: MYSQL
+    AllowedValues:
+      - POSTGRES
+      - MYSQL
+      - MARIADB
+      - ORACLE-SE2      # Oracle Standard Edition Two
+      - ORACLE-EE       # Oracle Enterprise Edition
+      - SQLSERVER-EE    # SQL Server Enterprise Edition
+      - SQLSERVER-SE    # SQL Server Standard Edition
+      - SQLSERVER-EX    # SQL Server Express Edition
+      - SQLSERVER-WEB   # SQL Server Web Edition
+      - AURORA          # Aurora MySQL-compatible
+      - AURORA-MYSQL    # Aurora MySQL (nuevo identificador)
+      - AURORA-POSTGRESQL # Aurora PostgreSQL
+
+    Description: Tipo de motor de base de datos
+
   DatabaseName:
     Type: String
     Description: Nombre de la base de datos
@@ -99,6 +118,10 @@ Parameters:
     Type: String
     Description: Contraseña del usuario de la base de datos
 
+  DatabaseRootPassword:
+    Type: String
+    Description: Contraseña del usuario de la base de datos
+
   DatabaseHost:
     Type: String
     Description: Contraseña del root de la base de datos
@@ -106,10 +129,38 @@ Parameters:
   DatabasePort:
     Type: String
     Description: Puerto de la base de datos
-  
+
+  LoadBalancerEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Habilitar Load Balancer
+
+  AutoScalingEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Habilitar Auto Scaling
+
+  MinCapacity:
+    Type: Number
+    Default: 1
+    Description: Capacidad mínima para Auto Scaling
+
+  MaxCapacity:
+    Type: Number
+    Default: 3
+    Description: Capacidad máxima para Auto Scaling
+
+Conditions:
+  LoadBalancerEnabledCondition: !Equals [!Ref LoadBalancerEnabled, "true"]
+  AutoScalingEnabledCondition: !Equals [!Ref AutoScalingEnabled, "true"]
 
 Resources:
-
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup  
     Properties:
@@ -121,6 +172,11 @@ Resources:
             ToPort: 80
             CidrIp: 0.0.0.0/0
 
+  ECSLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: !Sub "/ecs/${ClusterName}"
+        RetentionInDays: 7
 
   ECSCluster:
     Type: AWS::ECS::Cluster
@@ -140,7 +196,20 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-
+      Policies:
+        - PolicyName: CloudWatchLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: 
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${ClusterName}:*"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${ClusterName}"
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -153,52 +222,78 @@ Resources:
         - FARGATE
       ExecutionRoleArn: !GetAtt ECSExecutionRole.Arn
       ContainerDefinitions:
-        - Name: WebServer
-          Image: !Ref  Image1
-          Essential: true
-          Cpu: !Ref CpuContainer1
-          Memory: !Ref MemoryContainer1
-          PortMappings:
-            - ContainerPort: !Ref App1Port
-              Protocol: tcp
+      - Name: WebServer  # backend
+        Image: !Ref Image1
+        Essential: true
+        Cpu: !Ref CpuContainer1
+        Memory: !Ref MemoryContainer1
+        PortMappings:
+          - ContainerPort: !Ref App1Port  # ej: 3000
+            Protocol: tcp
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Sub "/ecs/${ClusterName}"
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: "webserver"
+            
+        Environment:
+          - Name: !Sub "${DatabaseEngine}_HOST"
+            Value: DataBase
+          - Name: !Sub "${DatabaseEngine}_PORT"
+            Value: !Ref DatabasePort
+          - Name: !Sub "${DatabaseEngine}_DATABASE"
+            Value: !Ref DatabaseName
+          - Name: !Sub "${DatabaseEngine}_USER"
+            Value: !Ref DatabaseUser
+          - Name: !Sub "${DatabaseEngine}_PASSWORD"
+            Value: !Ref DatabasePassword
+          - Name: !Sub "${DatabaseEngine}_ROOT_PASSWORD"
+            Value: !Ref DatabaseRootPassword
 
-        - Name: Website
-          Essential: false
-          Image: !Ref Image2
-          Cpu: !Ref CpuContainer2
-          Memory: !Ref MemoryContainer2
-          PortMappings:
-            - ContainerPort: !Ref App2Port
-              Protocol: tcp
+      - Name: Website  # frontend
+        Image: !Ref Image2
+        Essential: true
+        Cpu: !Ref CpuContainer2
+        Memory: !Ref MemoryContainer2
+        PortMappings:
+          - ContainerPort: !Ref App2Port  # ej: 80
+            Protocol: tcp
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Sub "/ecs/${ClusterName}"
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: "website"
 
-          Environment:
-            - Name: !Sub "${DatabaseEngine}_HOST"
-              Value: !Ref DatabaseHost
-
-            - Name: !Sub "${DatabaseEngine}_PORT"
-              Value: !Ref DatabasePort
-
-            - Name: !Sub "${DatabaseEngine}_DATABASE"
-              Value: !Ref DatabaseName
-
-            - Name: !Sub "${DatabaseEngine}_USER"
-              Value: !Ref DatabaseUser
-
-            - Name: !Sub "${DatabaseEngine}_PASSWORD"
-              Value: !Ref DatabasePassword
-
-            - Name: !Sub "${DatabaseEngine}_ROOT_PASSWORD"
-              Value: !Ref DatabasePassword
-
-        - Name: DataBase
-          Essential: false
-          Image: !Ref Image3
-          Cpu: !Ref CpuContainer3
-          Memory: !Ref MemoryContainer3
-          PortMappings:
-            - ContainerPort: !Ref App3Port
-              Protocol: tcp
-          
+      - Name: DataBase
+        Image: !Ref Image3
+        Essential: true
+        Cpu: !Ref CpuContainer3
+        Memory: !Ref MemoryContainer3
+        PortMappings:
+          - ContainerPort: !Ref App3Port  # ej: 3306
+            Protocol: tcp
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Sub "/ecs/${ClusterName}"
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: "database"
+        
+        Environment:
+          - Name: !Sub "${DatabaseEngine}_HOST"
+            Value: DataBase
+          - Name: !Sub "${DatabaseEngine}_PORT"
+            Value: !Ref DatabasePort
+          - Name: !Sub "${DatabaseEngine}_DATABASE"
+            Value: !Ref DatabaseName
+          - Name: !Sub "${DatabaseEngine}_USER"
+            Value: !Ref DatabaseUser
+          - Name: !Sub "${DatabaseEngine}_PASSWORD"
+            Value: !Ref DatabasePassword
+          - Name: !Sub "${DatabaseEngine}_ROOT_PASSWORD"
+            Value: !Ref DatabaseRootPassword
 
   ECSService:
     Type: AWS::ECS::Service
@@ -206,7 +301,7 @@ Resources:
     Properties:
       Cluster: !Ref ECSCluster
       LaunchType: FARGATE
-      DesiredCount: 3
+      DesiredCount: !If [AutoScalingEnabledCondition, !Ref MinCapacity, 3]
       TaskDefinition: !Ref TaskDefinition
       NetworkConfiguration:
         AwsvpcConfiguration:
@@ -215,6 +310,47 @@ Resources:
             - !Ref PublicSubnetId
           SecurityGroups:
             - !Ref InstanceSecurityGroup
+      LoadBalancers:
+        !If
+          - LoadBalancerEnabledCondition
+          - - ContainerName: WebServer
+              ContainerPort: !Ref App1Port
+              TargetGroupArn: !Ref ECSTargetGroup
+          - !Ref "AWS::NoValue"
+
+  ECSTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: LoadBalancerEnabledCondition
+    Properties:
+      VpcId: !Ref VPCId
+      Protocol: HTTP
+      Port: !Ref App1Port
+      TargetType: ip
+
+  ECSAutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: AutoScalingEnabledCondition
+    Properties:
+      MaxCapacity: !Ref MaxCapacity
+      MinCapacity: !Ref MinCapacity
+      ResourceId: !Sub "service/${ECSCluster}/${ECSService}"
+      RoleARN: !GetAtt ECSExecutionRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  ECSAutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: AutoScalingEnabledCondition
+    Properties:
+      PolicyName: ECSAutoScalingPolicy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSAutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 50.0
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
 
 Outputs:
   ServiceCluster:

@@ -1,0 +1,84 @@
+{
+    "ecs_config": {
+        "clusterName": "cluste-rey-manolo",
+        "serviceName": "",
+        "taskDefinitionFamily": "",
+        "taskCpu": 2048,
+        "taskMemory": 4096,
+        "desiredCount": 1,
+        "loadBalancer": false,
+        "autoScaling": false,
+        "minCapacity": 1,
+        "maxCapacity": 10,
+        "networkMode": "awsvpc",
+        "platformVersion": "LATEST",
+        "assignPublicIp": true,
+        "subnets": [
+            "subnet-default"
+        ],
+        "securityGroups": [
+            "sg-default"
+        ],
+        "containerPort": 80,
+        "protocol": "tcp",
+        "essential": true,
+        "logGroup": "/ecs/default-cluster",
+        "logRegion": "us-east-1",
+        "logStreamPrefix": "ecs",
+        "environmentVariables": [
+            {
+                "name": "MYSQL_ROOT_PASSWORD",
+                "value": "passwordk1"
+            },
+            {
+                "name": "MYSQL_DATABASE",
+                "value": "password3"
+            },
+            {
+                "name": "MYSQL_USER",
+                "value": "reyuser"
+            },
+            {
+                "name": "MYSQL_PASSWORD",
+                "value": "password badatabase"
+            },
+            {
+                "name": "MYSQL_PORT",
+                "value": "3306"
+            }
+        ],
+        "secrets": [],
+        "healthCheckEnabled": true,
+        "healthCheckPath": "/health",
+        "healthCheckInterval": 30,
+        "healthCheckTimeout": 5,
+        "healthCheckRetries": 3
+    },
+    "docker_images": [
+        {
+            "id": "1",
+            "name": "nginx",
+            "tag": "latest",
+            "port": 80,
+            "cpu": 256,
+            "memory": 256
+        },
+        {
+            "id": "1751468124663",
+            "name": "reymanuel/webapp",
+            "tag": "latest",
+            "port": 3005,
+            "cpu": 256,
+            "memory": 256
+        },
+        {
+            "id": "1751468097758",
+            "name": "mysql",
+            "tag": "latest",
+            "port": 3306,
+            "cpu": 512,
+            "memory": 1024
+        }
+    ],
+    "service": "ecs"
+}

@@ -12,16 +12,15 @@ class DockerImageSerializer(serializers.ModelSerializer):
 
 
 
-
 class DockerImageSerializer(serializers.Serializer):
     name = serializers.CharField()
     tag = serializers.CharField(required=False)
 
 class ECSConfigSerializer(serializers.Serializer):
     clusterName = serializers.CharField()
-    environmentVariables = serializers.ListField(
-        child=serializers.DictField(), required=False, allow_empty=True
-    )
+    # environmentVariables = serializers.ListField(
+    #     child=serializers.DictField(), required=False, allow_empty=True
+    # )
     # serviceName = serializers.CharField()
     # taskDefinitionFamily = serializers.CharField()
     taskCpu = serializers.IntegerField()
@@ -68,9 +67,24 @@ class DeploymentCreateSerializer(serializers.Serializer):
             cpu_units=ecs_data.get('taskCpu'),
             memory_mb=ecs_data.get('taskMemory'),
             docker_images=docker_images,
+            auto_scaling_enabled= ecs_data.get('autoScaling', False),
+            load_balancer = ecs_data.get('loadBalancer', False),
+            desired_count=ecs_data.get('desiredCount', 1),
+            min_count=ecs_data.get('minCapacity', 1),
+            max_count=ecs_data.get('maxCapacity', 1),
+            network_mode=ecs_data.get('networkMode', 'awsvpc'),
+            port_mappings=[
+                {
+                    'containerPort': ecs_data.get('containerPort', 80),
+                    'hostPort': ecs_data.get('containerPort', 80),
+                    'protocol': ecs_data.get('protocol', 'tcp')
+                }
+            ],
+            environment_variables=ecs_data.get('environmentVariables', []),
+            secrets=ecs_data.get('secrets', []),
         )
         deployment.save()
-        print("Deployment created with ID:", deployment.docker_images)
+        print("Deployment created with ID:", deployment.auto_scaling_enabled)
         return deployment
 
 

@@ -100,16 +100,17 @@ class Deployment(models.Model):
         null=True   
     )
     
-    # network_mode = models.CharField(
-    #     max_length=20,
-    #     default='awsvpc',
-    #     choices=[
-    #         ('awsvpc', 'awsvpc'),
-    #         ('bridge', 'bridge'),
-    #         ('host', 'host'),
-    #         ('none', 'none')
-    #     ]
-    # )
+    network_mode = models.CharField(
+        max_length=20,
+        default='awsvpc',
+        choices=[
+            ('awsvpc', 'awsvpc'),
+            ('bridge', 'bridge'),
+            ('host', 'host'),
+            ('none', 'none')
+        ]
+    )
+    load_balancer = models.BooleanField(default=False, help_text="Whether to attach a load balancer to the service")
     # # Container configuration
     # container_name = models.CharField(max_length=255, default='app')
     # command = models.JSONField(

@@ -9,6 +9,7 @@ from .models import Deployment, DockerImage
 dir_path = os.path.dirname(os.path.realpath(__file__))
 logger = logging.getLogger(__name__)
 
+
 class AWSService:
     def __init__(self, region_name: str = 'us-east-1'):
         self.region_name = region_name
@@ -17,6 +18,7 @@ class AWSService:
         self.stack_formations = boto3.client('cloudformation', region_name=region_name)
         self.logs_client = boto3.client('logs', region_name=region_name)
         self.autoscaling_client = boto3.client('application-autoscaling', region_name=region_name)
+        self.secrets_manayer_client = boto3.client('secretsmanager', region_name=region_name)
 
     def create_stack(self, deployment: Deployment,  parameters: List[Dict[str, str]]) -> str:
         print("Creating CloudFormation stack for deployment:", parameters)
@@ -34,9 +36,24 @@ class AWSService:
             return response['StackId']
         except Exception as e:
             logger.error(f"Error creating stack: {str(e)}")
+            try:
+                self.stack_formations.delete_stack(StackName=f"{deployment.name}-stack")
+                logger.info(f"Stack {deployment.name}-stack eliminado tras error en la creación.")
+            except Exception as delete_exc:
+                logger.error(f"Error eliminando stack tras fallo en la creación: {str(delete_exc)}")
+                raise
             raise
 
-
+    def get_secret_value(self, secret_name: str) -> Optional[str]:
+        try:
+            response = self.secrets_manayer_client.get_secret_value(SecretId=secret_name)
+            if 'SecretString' in response:
+                return response['SecretString']
+            else:
+                return None
+        except Exception as e:
+            logger.error(f"Error getting secret value: {str(e)}")
+            raise
 
     def update_service(self, deployment: Deployment, task_definition_arn: str) -> None:
         try:
@@ -113,32 +130,68 @@ class AWSService:
 class DeploymentService:
     def __init__(self):
         self.aws_service = AWSService()
+        self.database_engine = 'MYSQL'
 
-    def create_deployment(self, deployment: Deployment, docker_images: list, environment_variables: list) -> None:
+    def create_deployment(self, deployment: Deployment, docker_images: list, environment_variables: list, ecs_config: dict) -> None:
+        print(environment_variables, "***********")
         database_name = ''
         database_user = ''
         database_password = ''
         database_host = ''
         database_port = ''
+        database_root_password = ''
+        database_engines = [
+            "POSTGRES",
+            "MYSQL",
+            "MARIADB",
+            "ORACLE-SE2",
+            "ORACLE-EE",         
+            "SQLSERVER-EE",     
+            "SQLSERVER-SE",     
+            "SQLSERVER-EX",      
+            "SQLSERVER-WEB",    
+            "AURORA",            
+            "AURORA-MYSQL",     
+            "AURORA-POSTGRESQL"  
+        ]
+
+        for image in docker_images:
+            if image.get('name').upper() in database_engines:
+                self.database_engine = image.get('name').split(':')[0].upper()
+                break
+
 
         for env in environment_variables:
+            print(env)
+            if env.get("name") == "MYSQL_ROOT_PASSWORD":
+                database_root_password = env.get("value")
+
             if env.get("name") == "MYSQL_DATABASE":
                 database_name = env.get("value")
-                break
+           
             if env.get("name") == "MYSQL_USER":
                 database_user = env.get("value")
-                break
+  
             if env.get("name") == "MYSQL_PASSWORD":
                 database_password = env.get("value")
-                break
+             
             if env.get("name") == "MYSQL_HOST":         
                 database_host = env.get("value")
-                break
+              
             if env.get("name") == "MYSQL_PORT":
                 database_port = env.get("value")
-                break
-        print("Creating deployment with parameters:", environment_variables)
+            
+
         try:
+
+            print("Database variables:")
+            print("database_name:", database_name)
+            print("database_user:", database_user)
+            print("database_password:", database_password)
+            print("database_host:", database_host)
+            print("database_port:", database_port)
+            print("database_root_password:", database_root_password)
+            print("database_engine:", self.database_engine)
             parameters = [
                 {
                     'ParameterKey': 'ClusterName',
@@ -191,14 +244,20 @@ class DeploymentService:
                     'ParameterKey': 'CpuContainer3',
                     'ParameterValue': str(docker_images[2].get('cpu')) if len(docker_images) > 2 else None
                 },
-                {        'ParameterKey': 'MemoryContainer1',
+                {    
+                    'ParameterKey': 'MemoryContainer1',
                     'ParameterValue': str(docker_images[0].get('memory')) if len(docker_images) > 0 else None
                 },
-                {        'ParameterKey': 'MemoryContainer2',
+                {    
+                    'ParameterKey': 'MemoryContainer2',
                     'ParameterValue': str(docker_images[1].get('memory')) if len(docker_images) > 1 else None
                 },
-                {        'ParameterKey': 'MemoryContainer3',
+                {   'ParameterKey': 'MemoryContainer3',
                     'ParameterValue': str(docker_images[2].get('memory')) if len(docker_images) > 2 else None
+                },
+                {
+                    'ParameterKey': 'DatabaseEngine',
+                    'ParameterValue': self.database_engine,
                 },
                 {
                     'ParameterKey': 'DatabaseName',
@@ -219,19 +278,51 @@ class DeploymentService:
                 {
                     'ParameterKey': 'DatabasePort',
                     'ParameterValue':  database_port
-                } 
+                },
+                {
+                    'ParameterKey': 'DatabaseRootPassword',
+                    'ParameterValue':  database_root_password
+                },
+                
             ]
 
-            
+            # --- NUEVO: Agregar parámetros para Load Balancer y Auto Scaling si corresponde ---
+            if ecs_config.get('loadBalancer', False):
+                parameters.append({
+                    'ParameterKey': 'LoadBalancerEnabled',
+                    'ParameterValue': 'true'
+                })
+            else:
+                parameters.append({
+                    'ParameterKey': 'LoadBalancerEnabled',
+                    'ParameterValue': 'false'
+                })
+
+            if ecs_config.get('autoScaling', False):
+                parameters.append({
+                    'ParameterKey': 'AutoScalingEnabled',
+                    'ParameterValue': 'true'
+                })
+                if ecs_config.get("min_count") is not None:
+                    parameters.append({
+                        'ParameterKey': 'MinCapacity',
+                        'ParameterValue': str(min_capacity)
+                    })
+                if ecs_config.get("max_count") is not None:
+                    parameters.append({
+                        'ParameterKey': 'MaxCapacity',
+                        'ParameterValue': str(max_capacity)
+                    })
+            else:
+                parameters.append({
+                    'ParameterKey': 'AutoScalingEnabled',
+                    'ParameterValue': 'false'
+                })
+
+
             cluster_arn = self.aws_service.create_stack(deployment, parameters)
             deployment.aws_cluster_arn = cluster_arn
             deployment.save()
-
-     
-            
-    
-
-    
 
         except Exception as e:
             deployment.status = 'failed'
