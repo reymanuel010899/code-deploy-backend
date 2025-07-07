@@ -1,11 +1,11 @@
 {
     "ecs_config": {
-        "clusterName": "cluste-rey-manolo",
+        "clusterName": "cluste-rey-rey-255",
         "serviceName": "",
         "taskDefinitionFamily": "",
         "taskCpu": 2048,
         "taskMemory": 4096,
-        "desiredCount": 1,
+        "desiredCount": 2,
         "loadBalancer": false,
         "autoScaling": false,
         "minCapacity": 1,
@@ -57,9 +57,9 @@
     "docker_images": [
         {
             "id": "1",
-            "name": "nginx",
+            "name": "reymanuel/code-deploy-backend",
             "tag": "latest",
-            "port": 80,
+            "port": 8000,
             "cpu": 256,
             "memory": 256
         },
@@ -67,7 +67,7 @@
             "id": "1751468124663",
             "name": "reymanuel/webapp",
             "tag": "latest",
-            "port": 3005,
+            "port": 80,
             "cpu": 256,
             "memory": 256
         },

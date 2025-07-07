@@ -184,14 +184,6 @@ class DeploymentService:
 
         try:
 
-            print("Database variables:")
-            print("database_name:", database_name)
-            print("database_user:", database_user)
-            print("database_password:", database_password)
-            print("database_host:", database_host)
-            print("database_port:", database_port)
-            print("database_root_password:", database_root_password)
-            print("database_engine:", self.database_engine)
             parameters = [
                 {
                     'ParameterKey': 'ClusterName',
@@ -283,10 +275,13 @@ class DeploymentService:
                     'ParameterKey': 'DatabaseRootPassword',
                     'ParameterValue':  database_root_password
                 },
+                {
+                    'ParameterKey': 'DesiredTaskCount',
+                    'ParameterValue':  ecs_config.get("desiredCount", 1)
+                },
                 
             ]
 
-            # --- NUEVO: Agregar parámetros para Load Balancer y Auto Scaling si corresponde ---
             if ecs_config.get('loadBalancer', False):
                 parameters.append({
                     'ParameterKey': 'LoadBalancerEnabled',

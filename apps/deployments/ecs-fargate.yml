@@ -10,6 +10,15 @@ Parameters:
     Type: String
     Default: subnet-08739eb429d2fabe8
 
+  PublicSubnetId2:
+    Type: String
+    Description: Segunda Subred Publica para el Load Balancer (en una AZ diferente)
+    Default: subnet-0992517bfc7a9454c 
+
+  ECSServiceName:
+    Type: String
+    Default: ecs-service
+
   PrivateSubnetId:
     Type: String
     Default: subnet-02ad64779efe7a82d
@@ -156,9 +165,15 @@ Parameters:
     Default: 3
     Description: Capacidad máxima para Auto Scaling
 
+  DesiredTaskCount:
+    Type: Number
+    Default: 1
+    Description: Capacidad máxima para Auto Scaling
+    
 Conditions:
   LoadBalancerEnabledCondition: !Equals [!Ref LoadBalancerEnabled, "true"]
   AutoScalingEnabledCondition: !Equals [!Ref AutoScalingEnabled, "true"]
+  LoadBalancerDisabledCondition: !Not [!Condition LoadBalancerEnabledCondition]
 
 Resources:
   InstanceSecurityGroup:
@@ -257,7 +272,8 @@ Resources:
         Cpu: !Ref CpuContainer2
         Memory: !Ref MemoryContainer2
         PortMappings:
-          - ContainerPort: !Ref App2Port  # ej: 80
+          - ContainerPort: !Ref App2Port # ej: 80
+            hostPort: !Ref App2Port
             Protocol: tcp
         LogConfiguration:
           LogDriver: awslogs
@@ -295,13 +311,37 @@ Resources:
           - Name: !Sub "${DatabaseEngine}_ROOT_PASSWORD"
             Value: !Ref DatabaseRootPassword
 
-  ECSService:
+  ECSALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Condition: LoadBalancerEnabledCondition
+    Properties:
+      Subnets:
+        - !Ref PublicSubnetId
+        - !Ref PublicSubnetId2 
+      SecurityGroups:
+        - !Ref InstanceSecurityGroup
+      Scheme: internet-facing
+
+  ECSALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: LoadBalancerEnabledCondition
+    Properties:
+      LoadBalancerArn: !Ref ECSALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ECSTargetGroup
+
+
+  ECSServiceWithLB:
     Type: AWS::ECS::Service
-    DependsOn: ECSCluster
+    Condition: LoadBalancerEnabledCondition
+    DependsOn: ECSALBListener
     Properties:
       Cluster: !Ref ECSCluster
       LaunchType: FARGATE
-      DesiredCount: !If [AutoScalingEnabledCondition, !Ref MinCapacity, 3]
+      DesiredCount: !Ref MinCapacity
       TaskDefinition: !Ref TaskDefinition
       NetworkConfiguration:
         AwsvpcConfiguration:
@@ -311,12 +351,26 @@ Resources:
           SecurityGroups:
             - !Ref InstanceSecurityGroup
       LoadBalancers:
-        !If
-          - LoadBalancerEnabledCondition
-          - - ContainerName: WebServer
-              ContainerPort: !Ref App1Port
-              TargetGroupArn: !Ref ECSTargetGroup
-          - !Ref "AWS::NoValue"
+        - ContainerName: WebServer
+          ContainerPort: !Ref App1Port
+          TargetGroupArn: !Ref ECSTargetGroup
+
+  ECSServiceNoLB:
+    Type: AWS::ECS::Service
+    Condition: LoadBalancerDisabledCondition
+    Properties:
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      DesiredCount: !Ref DesiredTaskCount
+      TaskDefinition: !Ref TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref PublicSubnetId
+          SecurityGroups:
+            - !Ref InstanceSecurityGroup
+
 
   ECSTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -333,7 +387,7 @@ Resources:
     Properties:
       MaxCapacity: !Ref MaxCapacity
       MinCapacity: !Ref MinCapacity
-      ResourceId: !Sub "service/${ECSCluster}/${ECSService}"
+      ResourceId: !Sub "service/${ECSCluster}/${ECSServiceName}"
       RoleARN: !GetAtt ECSExecutionRole.Arn
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
@@ -346,7 +400,7 @@ Resources:
       PolicyType: TargetTrackingScaling
       ScalingTargetId: !Ref ECSAutoScalingTarget
       TargetTrackingScalingPolicyConfiguration:
-        TargetValue: 50.0
+        TargetValue: 85.0
         PredefinedMetricSpecification:
           PredefinedMetricType: ECSServiceAverageCPUUtilization
         ScaleInCooldown: 60
@@ -359,4 +413,9 @@ Outputs:
 
   ECSServiceName:
     Description: Nombre del servicio ECS creado
-    Value: !Ref ECSService
+    Value: !Ref ECSServiceName
+
+  LoadBalancerURL:
+    Description: URL del Load Balancer (si está habilitado)
+    Value: !If [LoadBalancerEnabledCondition, !GetAtt ECSALB.DNSName, "Load Balancer no habilitado"]
+    Condition: LoadBalancerEnabledCondition 
