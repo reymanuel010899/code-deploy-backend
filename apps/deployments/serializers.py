@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import DockerImage, Deployment
+import uuid
 
 class DockerImageSerializer(serializers.ModelSerializer):
     full_image_name = serializers.CharField(read_only=True)
@@ -18,11 +19,8 @@ class DockerImageSerializer(serializers.Serializer):
 
 class ECSConfigSerializer(serializers.Serializer):
     clusterName = serializers.CharField()
-    # environmentVariables = serializers.ListField(
-    #     child=serializers.DictField(), required=False, allow_empty=True
-    # )
-    # serviceName = serializers.CharField()
-    # taskDefinitionFamily = serializers.CharField()
+    IsRepoPrivate = serializers.BooleanField(default=False)
+    privateRegistryCredentials = serializers.DictField(required=False)
     taskCpu = serializers.IntegerField()
     taskMemory = serializers.IntegerField()
     desiredCount = serializers.IntegerField()
@@ -62,7 +60,7 @@ class DeploymentCreateSerializer(serializers.Serializer):
 
         deployment = Deployment.objects.create(
             user=user,
-            aws_cluster_arn=ecs_data.get('clusterName'),
+            aws_cluster_arn= f"{ecs_data.get('clusterName')}_{str(uuid.uuid4())[:8]}",
             name=ecs_data.get('clusterName') + "-deploy",
             cpu_units=ecs_data.get('taskCpu'),
             memory_mb=ecs_data.get('taskMemory'),

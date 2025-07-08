@@ -109,12 +109,13 @@ def create_deployment(request):
     serializer = DeploymentCreateSerializer(data=request.data, context={'request': request})
     if serializer.is_valid():
         try:
+            user = request.user
             docker_images = serializer.validated_data.get('docker_images')
             ecs_config = serializer.validated_data.get('ecs_config', {})
             deployment = serializer.save()
             deployment_service = DeploymentService()
-            print("--------",ecs_config.get('environmentVariables', []), "-----")
-            deployment_service.create_deployment(deployment, docker_images=docker_images, environment_variables=ecs_config.get('environmentVariables', []), ecs_config=ecs_config)
+            deployment_service.create_deployment(deployment, docker_images=docker_images, environment_variables=ecs_config.get('environmentVariables', []), ecs_config=ecs_config, user=user)
+            
             return Response(
                 DeploymentDetailSerializer(deployment).data,
                 status=status.HTTP_201_CREATED

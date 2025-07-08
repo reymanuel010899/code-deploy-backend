@@ -4,8 +4,11 @@ import logging
 from typing import Dict, List, Optional
 from django.conf import settings
 from .models import Deployment, DockerImage
+from django.contrib.auth import get_user_model
+import json
+import uuid
 
-
+User = get_user_model()
 dir_path = os.path.dirname(os.path.realpath(__file__))
 logger = logging.getLogger(__name__)
 
@@ -18,7 +21,8 @@ class AWSService:
         self.stack_formations = boto3.client('cloudformation', region_name=region_name)
         self.logs_client = boto3.client('logs', region_name=region_name)
         self.autoscaling_client = boto3.client('application-autoscaling', region_name=region_name)
-        self.secrets_manayer_client = boto3.client('secretsmanager', region_name=region_name)
+        self.secrets_manager_client = boto3.client('secretsmanager', region_name=region_name)
+        self.sts_client = boto3.client('sts', region_name=region_name)
 
     def create_stack(self, deployment: Deployment,  parameters: List[Dict[str, str]]) -> str:
         print("Creating CloudFormation stack for deployment:", parameters)
@@ -46,7 +50,7 @@ class AWSService:
 
     def get_secret_value(self, secret_name: str) -> Optional[str]:
         try:
-            response = self.secrets_manayer_client.get_secret_value(SecretId=secret_name)
+            response = self.secrets_manager_client.get_secret_value(SecretId=secret_name)
             if 'SecretString' in response:
                 return response['SecretString']
             else:
@@ -54,6 +58,26 @@ class AWSService:
         except Exception as e:
             logger.error(f"Error getting secret value: {str(e)}")
             raise
+
+    def get_account_id(self):
+        response = self.sts_client.get_caller_identity()
+        account_id = response['Account']
+        return account_id
+
+    def create_secret(self, secret_name: str, secret_value: dict):
+        try:
+            response = self.secrets_manager_client.create_secret(
+                Name=secret_name,
+                SecretString=json.dumps(secret_value)
+            )
+            return response['ARN']
+        except self.secrets_manager_client.exceptions.ResourceExistsException:
+            print(f"⚠️ El secreto '{secret_name}' ya existe.")
+            existing_secret_arn = self.build_credentials_parameter(secret_name)
+            return existing_secret_arn
+
+    def build_credentials_parameter(self, secret_name: str):
+        return f"arn:aws:secretsmanager:{self.region_name}:{self.get_account_id()}:secret:{secret_name}"
 
     def update_service(self, deployment: Deployment, task_definition_arn: str) -> None:
         try:
@@ -132,8 +156,13 @@ class DeploymentService:
         self.aws_service = AWSService()
         self.database_engine = 'MYSQL'
 
-    def create_deployment(self, deployment: Deployment, docker_images: list, environment_variables: list, ecs_config: dict) -> None:
-        print(environment_variables, "***********")
+    def create_deployment(self, deployment: Deployment, docker_images: list, environment_variables: list, ecs_config: dict, user: User) -> None:
+        if ecs_config.get("IsRepoPrivate"):
+            images_backend = environment_variables[1].get("name")
+            secret_name = f"{images_backend}_{user.username}_1"
+            arn_secret = self.aws_service.create_secret(secret_name, ecs_config.get("privateRegistryCredentials", {}))
+            print(arn_secret)
+
         database_name = ''
         database_user = ''
         database_password = ''
@@ -162,7 +191,6 @@ class DeploymentService:
 
 
         for env in environment_variables:
-            print(env)
             if env.get("name") == "MYSQL_ROOT_PASSWORD":
                 database_root_password = env.get("value")
 
@@ -277,9 +305,16 @@ class DeploymentService:
                 },
                 {
                     'ParameterKey': 'DesiredTaskCount',
-                    'ParameterValue':  ecs_config.get("desiredCount", 1)
+                    'ParameterValue':  str(ecs_config.get("desiredCount", 1))
                 },
-                
+                {
+                    'ParameterKey': 'CredetialRepository',
+                    'ParameterValue':  self.aws_service.build_credentials_parameter(secret_name) if ecs_config.get("IsRepoPrivate") else ""
+                },
+                {
+                    'ParameterKey': 'IsPrivateRepo',
+                    'ParameterValue':  'true' if ecs_config.get("IsRepoPrivate") else 'false'
+                },
             ]
 
             if ecs_config.get('loadBalancer', False):

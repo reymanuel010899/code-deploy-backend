@@ -52,8 +52,14 @@
         "healthCheckPath": "/health",
         "healthCheckInterval": 30,
         "healthCheckTimeout": 5,
-        "healthCheckRetries": 3
+        "healthCheckRetries": 3,
+        "privateRegistryCredentials": {
+        "username": "reymanuel",
+        "password": "reymanuel01235"
+        },
+        "IsRepoPrivate": true
     },
+    
     "docker_images": [
         {
             "id": "1",

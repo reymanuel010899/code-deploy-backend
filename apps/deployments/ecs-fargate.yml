@@ -2,6 +2,15 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: ECS Fargate Cluster usando VPC y subnets existentes
 
 Parameters:
+  CredetialRepository:
+    Type: String
+    Description: Nombre de la definición de tarea
+
+  IsPrivateRepo:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+
   VPCId:
     Type: String
     Default: vpc-0d1125fbea39e69f4
@@ -174,6 +183,7 @@ Conditions:
   LoadBalancerEnabledCondition: !Equals [!Ref LoadBalancerEnabled, "true"]
   AutoScalingEnabledCondition: !Equals [!Ref AutoScalingEnabled, "true"]
   LoadBalancerDisabledCondition: !Not [!Condition LoadBalancerEnabledCondition]
+  UsePrivateRepo: !Equals [ !Ref IsPrivateRepo, "true" ]
 
 Resources:
   InstanceSecurityGroup:
@@ -225,6 +235,15 @@ Resources:
                 Resource: 
                   - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${ClusterName}:*"
                   - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${ClusterName}"
+        - PolicyName: AllowSecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - arn:aws:secretsmanager:us-east-1:144571874415:secret:*
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -242,6 +261,12 @@ Resources:
         Essential: true
         Cpu: !Ref CpuContainer1
         Memory: !Ref MemoryContainer1
+        RepositoryCredentials:
+          Fn::If:
+            - UsePrivateRepo
+            - CredentialsParameter: !Ref CredetialRepository
+            - Ref: AWS::NoValue
+          
         PortMappings:
           - ContainerPort: !Ref App1Port  # ej: 3000
             Protocol: tcp
@@ -271,6 +296,12 @@ Resources:
         Essential: true
         Cpu: !Ref CpuContainer2
         Memory: !Ref MemoryContainer2
+        RepositoryCredentials:
+          Fn::If:
+            - UsePrivateRepo
+            - CredentialsParameter: !Ref CredetialRepository
+            - Ref: AWS::NoValue
+
         PortMappings:
           - ContainerPort: !Ref App2Port # ej: 80
             hostPort: !Ref App2Port
