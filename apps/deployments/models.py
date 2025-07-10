@@ -40,6 +40,11 @@ class Deployment(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='deployments')
     name = models.CharField(max_length=255)
+    service = models.CharField(max_length=15, blank=True, null=True)
+    regions = models.JSONField( default=list,
+        help_text="List of Docker images in format [{'name': 'image_name', 'tag': 'latest', 'port': 80, 'registry_url': 'docker.io', 'repository_name': 'my_repo'}]",
+        blank=True,)
+    deployment_url = models.CharField(max_length=50, blank=True)
     # docker_image = models.ForeignKey(DockerImage, on_delete=models.PROTECT, blank=True, null=True, related_name='deployments')
     docker_images = models.JSONField(
         default=list,
@@ -150,6 +155,16 @@ class Deployment(models.Model):
     #     default=list,
     #     help_text="List of scheduled scaling actions in format [{'schedule': 'cron(0 8 * * ? *)', 'min_capacity': 2, 'max_capacity': 10}]"
     # )
+
+
+
+
+    #  'id', 'name', 'docker_image', 'status', 'status_details',
+    #         'created_at', 'updated_at', 'cpu_units', 'memory_mb',
+    #          'command', 'entrypoint', 'port_mappings',
+    #         'network_mode', 'environment_variables', 'secrets',
+    #         'volumes', 'health_check', 'desired_count', 'min_count',
+    #         'max_count'
     
     class Meta:
         ordering = ['-created_at']

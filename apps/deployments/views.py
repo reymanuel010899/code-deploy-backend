@@ -5,7 +5,7 @@ from rest_framework.decorators import api_view, permission_classes
 from django.shortcuts import get_object_or_404
 from .models import Deployment
 from .serializers import (
-    DockerImageSerializer, DeploymentCreateSerializer, DeploymentUpdateSerializer,
+    ContainerImageSerializer, DeploymentCreateSerializer, DeploymentUpdateSerializer,
     DeploymentDetailSerializer, DeploymentListSerializer,
 
 )
@@ -19,87 +19,86 @@ class IsOwner(permissions.BasePermission):
         return obj.user == request.user
 
 # Vistas para Docker Images
-@api_view(['GET'])
-@permission_classes([permissions.IsAuthenticated])
-def list_docker_images(request):
-    """Lista todas las imágenes Docker del usuario"""
-    images = DockerImage.objects.filter(user=request.user)
-    serializer = DockerImageSerializer(images, many=True)
-    return Response(serializer.data)
-
-@api_view(['POST'])
+# @api_view(['GET'])
 # @permission_classes([permissions.IsAuthenticated])
-def create_docker_image(request):
-    """Crea una nueva imagen Docker"""
-    serializer = DockerImageSerializer(data=request.data)
-    if serializer.is_valid():
-        serializer.save(user=request.user)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+# def list_docker_images(request):
+#     """Lista todas las imágenes Docker del usuario"""
+#     images = DockerImage.objects.filter(user=request.user)
+#     serializer = DockerImageSerializer(images, many=True)
+#     return Response(serializer.data)
 
-@api_view(['GET'])
-@permission_classes([permissions.IsAuthenticated, IsOwner])
-def get_docker_image(request, image_id):
-    """Obtiene detalles de una imagen Docker"""
-    image = get_object_or_404(DockerImage, id=image_id)
-    serializer = DockerImageSerializer(image)
-    return Response(serializer.data)
+# @api_view(['POST'])
+# # @permission_classes([permissions.IsAuthenticated])
+# def create_docker_image(request):
+#     """Crea una nueva imagen Docker"""
+#     serializer = DockerImageSerializer(data=request.data)
+#     if serializer.is_valid():
+#         serializer.save(user=request.user)
+#         return Response(serializer.data, status=status.HTTP_201_CREATED)
+#     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['PUT'])
-@permission_classes([permissions.IsAuthenticated, IsOwner])
-def update_docker_image(request, image_id):
-    """Actualiza una imagen Docker"""
-    image = get_object_or_404(DockerImage, id=image_id)
-    serializer = DockerImageSerializer(image, data=request.data, partial=True)
-    if serializer.is_valid():
-        serializer.save()
-        return Response(serializer.data)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+# @api_view(['GET'])
+# @permission_classes([permissions.IsAuthenticated, IsOwner])
+# def get_docker_image(request, image_id):
+#     """Obtiene detalles de una imagen Docker"""
+#     image = get_object_or_404(DockerImage, id=image_id)
+#     serializer = DockerImageSerializer(image)
+#     return Response(serializer.data)
 
-@api_view(['DELETE'])
-@permission_classes([permissions.IsAuthenticated, IsOwner])
-def delete_docker_image(request, image_id):
-    """Elimina una imagen Docker"""
-    image = get_object_or_404(DockerImage, id=image_id)
-    image.delete()
-    return Response(status=status.HTTP_204_NO_CONTENT)
+# @api_view(['PUT'])
+# # @permission_classes([permissions.IsAuthenticated, IsOwner])
+# def update_database_container(request, image_id):
+#     # image = get_object_or_404(DockerImage, id=image_id)
+#     serializer = ContainerImageSerializer(data=request.data, partial=True)
+#     if serializer.is_valid():
+#         serializer.save()
+#         return Response(serializer.data)
+#     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-@api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated, IsOwner])
-def validate_docker_image(request, image_id):
-    """Valida que la imagen Docker exista y sea accesible"""
-    image = get_object_or_404(DockerImage, id=image_id)
-    docker_service = DockerImageService()
+# @api_view(['DELETE'])
+# @permission_classes([permissions.IsAuthenticated, IsOwner])
+# def delete_docker_image(request, image_id):
+#     """Elimina una imagen Docker"""
+#     image = get_object_or_404(DockerImage, id=image_id)
+#     image.delete()
+#     return Response(status=status.HTTP_204_NO_CONTENT)
+
+# @api_view(['POST'])
+# @permission_classes([permissions.IsAuthenticated, IsOwner])
+# def validate_docker_image(request, image_id):
+#     """Valida que la imagen Docker exista y sea accesible"""
+#     image = get_object_or_404(DockerImage, id=image_id)
+#     docker_service = DockerImageService()
     
-    if docker_service.validate_image(image):
-        return Response({'status': 'valid'})
-    return Response(
-        {'status': 'invalid', 'message': 'Image not found or not accessible'},
-        status=status.HTTP_400_BAD_REQUEST
-    )
+#     if docker_service.validate_image(image):
+#         return Response({'status': 'valid'})
+#     return Response(
+#         {'status': 'invalid', 'message': 'Image not found or not accessible'},
+#         status=status.HTTP_400_BAD_REQUEST
+#     )
 
-@api_view(['GET'])
-@permission_classes([permissions.IsAuthenticated, IsOwner])
-def get_docker_image_details(request, image_id):
-    """Obtiene detalles técnicos de una imagen Docker"""
-    image = get_object_or_404(DockerImage, id=image_id)
-    docker_service = DockerImageService()
+# @api_view(['GET'])
+# @permission_classes([permissions.IsAuthenticated, IsOwner])
+# def get_docker_image_details(request, image_id):
+#     """Obtiene detalles técnicos de una imagen Docker"""
+#     image = get_object_or_404(DockerImage, id=image_id)
+#     docker_service = DockerImageService()
     
-    try:
-        details = docker_service.get_image_details(image)
-        return Response(details)
-    except Exception as e:
-        return Response(
-            {'error': str(e)},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+#     try:
+#         details = docker_service.get_image_details(image)
+#         return Response(details)
+#     except Exception as e:
+#         return Response(
+#             {'error': str(e)},
+#             status=status.HTTP_400_BAD_REQUEST
+#         )
 
 # Vistas para Deployments
 @api_view(['GET'])
-@permission_classes([permissions.IsAuthenticated])
+# @permission_classes([permissions.IsAuthenticated])
 def list_deployments(request):
-    """Lista todos los deployments del usuario"""
-    deployments = Deployment.objects.filter(user=request.user)
+    deployments = Deployment.objects.filter(status='pending')
+    
     serializer = DeploymentListSerializer(deployments, many=True)
     return Response(serializer.data)
 

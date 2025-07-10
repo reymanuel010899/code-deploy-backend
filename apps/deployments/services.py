@@ -1,3 +1,4 @@
+import time
 import boto3
 import os
 import logging
@@ -12,6 +13,18 @@ User = get_user_model()
 dir_path = os.path.dirname(os.path.realpath(__file__))
 logger = logging.getLogger(__name__)
 
+class AWSupdateServices:
+    def __init__(self, region_name: str = 'us-east-1'):
+        self.s3_services = boto3.client('s3', region_name=region_name)
+
+    def backup_data_base(self, container):
+        pass
+
+    def update_conatiner(self):
+        pass
+
+
+
 
 class AWSService:
     def __init__(self, region_name: str = 'us-east-1'):
@@ -23,6 +36,8 @@ class AWSService:
         self.autoscaling_client = boto3.client('application-autoscaling', region_name=region_name)
         self.secrets_manager_client = boto3.client('secretsmanager', region_name=region_name)
         self.sts_client = boto3.client('sts', region_name=region_name)
+        self.ec2_client = boto3.client('ec2', region_name=region_name)
+        self.update_services = AWSupdateServices()
 
     def create_stack(self, deployment: Deployment,  parameters: List[Dict[str, str]]) -> str:
         print("Creating CloudFormation stack for deployment:", parameters)
@@ -46,6 +61,62 @@ class AWSService:
             except Exception as delete_exc:
                 logger.error(f"Error eliminando stack tras fallo en la creación: {str(delete_exc)}")
                 raise
+            raise
+    def get_first_task_public_ip(self, stack_name: str) -> str:
+        try:
+            # 1️⃣ Obtener nombre del ECS Cluster desde el Stack
+            resources = self.stack_formations.describe_stack_resources(StackName=stack_name)
+            cluster_name = None
+            for res in resources['StackResources']:
+                if res['ResourceType'] == 'AWS::ECS::Cluster':
+                    cluster_name = res['PhysicalResourceId']
+                    break
+
+            if not cluster_name:
+                raise Exception("No ECS Cluster found in stack.")
+
+            # 2️⃣ Listar las tasks activas en el Cluster
+            tasks = self.ecs_client.list_tasks(
+                cluster=cluster_name,
+                desiredStatus='RUNNING'
+            )['taskArns']
+
+            if not tasks:
+                raise Exception("No running ECS tasks found.")
+
+            task_arn = tasks[0]  # Primera Task
+
+            # 3️⃣ Obtener detalles de la Task para conseguir la ENI
+            task_desc = self.ecs_client.describe_tasks(
+                cluster=cluster_name,
+                tasks=[task_arn]
+            )
+
+            attachments = task_desc['tasks'][0]['attachments']
+            network_interface_id = None
+            for detail in attachments[0]['details']:
+                if detail['name'] == 'networkInterfaceId':
+                    network_interface_id = detail['value']
+                    break
+
+            if not network_interface_id:
+                raise Exception("No network interface found for task.")
+
+            # 4️⃣ Consultar la ENI en EC2 para obtener la IP pública
+            eni_desc = self.ec2_client.describe_network_interfaces(
+                NetworkInterfaceIds=[network_interface_id]
+            )
+
+            public_ip = eni_desc['NetworkInterfaces'][0].get('Association', {}).get('PublicIp')
+
+            if not public_ip:
+                raise Exception("No network interface found for task.")
+                # return {"error": "No available public IP yet for the network interface"}
+
+            return public_ip
+
+        except Exception as e:
+            logger.error(f"Error getting public IP: {str(e)}")
             raise
 
     def get_secret_value(self, secret_name: str) -> Optional[str]:
@@ -155,6 +226,15 @@ class DeploymentService:
     def __init__(self):
         self.aws_service = AWSService()
         self.database_engine = 'MYSQL'
+    
+    def wait_for_task_running(self, cluster_name, max_wait=300, interval=10):
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            tasks = self.aws_service.ecs_client.list_tasks(cluster=cluster_name, desiredStatus='RUNNING')['taskArns']
+            if tasks:
+                return tasks[0]  # Devuelve el ARN de la primera task corriendo
+            time.sleep(interval)
+        raise Exception("Timeout waiting for ECS task to be RUNNING")
 
     def create_deployment(self, deployment: Deployment, docker_images: list, environment_variables: list, ecs_config: dict, user: User) -> None:
         if ecs_config.get("IsRepoPrivate"):
@@ -227,7 +307,7 @@ class DeploymentService:
                 },
                 {
                     'ParameterKey': 'Image2',
-                    'ParameterValue': docker_images[1].get('name') if len(docker_images) > 1 else None
+                   'ParameterValue': docker_images[1].get('name') if len(docker_images) > 1 else None
                 },
                 {
                     'ParameterKey': 'Image3',
@@ -328,91 +408,91 @@ class DeploymentService:
                     'ParameterValue': 'false'
                 })
 
-            if ecs_config.get('autoScaling', False):
-                parameters.append({
-                    'ParameterKey': 'AutoScalingEnabled',
-                    'ParameterValue': 'true'
-                })
-                if ecs_config.get("min_count") is not None:
-                    parameters.append({
-                        'ParameterKey': 'MinCapacity',
-                        'ParameterValue': str(min_capacity)
-                    })
-                if ecs_config.get("max_count") is not None:
-                    parameters.append({
-                        'ParameterKey': 'MaxCapacity',
-                        'ParameterValue': str(max_capacity)
-                    })
-            else:
-                parameters.append({
-                    'ParameterKey': 'AutoScalingEnabled',
-                    'ParameterValue': 'false'
-                })
+            # if ecs_config.get('autoScaling', False):
+            #     parameters.append({
+            #         'ParameterKey': 'AutoScalingEnabled',
+            #         'ParameterValue': 'true'
+            #     })
+            #     if ecs_config.get("min_count") is not None:
+            #         parameters.append({
+            #             'ParameterKey': 'MinCapacity',
+            #             'ParameterValue': str(min_capacity)
+            #         })
+            #     if ecs_config.get("max_count") is not None:
+            #         parameters.append({
+            #             'ParameterKey': 'MaxCapacity',
+            #             'ParameterValue': str(max_capacity)
+            #         })
+            # else:
+            #     parameters.append({
+            #         'ParameterKey': 'AutoScalingEnabled',
+            #         'ParameterValue': 'false'
+            #     })
 
 
             cluster_arn = self.aws_service.create_stack(deployment, parameters)
             deployment.aws_cluster_arn = cluster_arn
             deployment.save()
 
-        except Exception as e:
+        except Exception:
             deployment.status = 'failed'
             deployment.save()
             raise
 
-    def update_deployment(self, deployment: Deployment) -> None:
-        """Actualiza un deployment existente"""
-        try:
+    # def update_deployment(self, deployment: Deployment) -> None:
+    #     """Actualiza un deployment existente"""
+    #     try:
     
-            task_definition_arn = self.aws_service.create_task_definition(deployment)
+    #         task_definition_arn = self.aws_service.create_task_definition(deployment)
             
-            # Actualizar servicio
-            self.aws_service.update_service(deployment, task_definition_arn)
+    #         # Actualizar servicio
+    #         self.aws_service.update_service(deployment, task_definition_arn)
 
-            DeploymentLog.objects.create(
-                deployment=deployment,
-                message="Deployment actualizado exitosamente",
-                log_type='success',
-                source='system'
-            )
+    #         DeploymentLog.objects.create(
+    #             deployment=deployment,
+    #             message="Deployment actualizado exitosamente",
+    #             log_type='success',
+    #             source='system'
+    #         )
 
-        except Exception as e:
-            DeploymentLog.objects.create(
-                deployment=deployment,
-                message=f"Error al actualizar deployment: {str(e)}",
-                log_type='error',
-                source='system'
-            )
-            raise
+    #     except Exception as e:
+    #         DeploymentLog.objects.create(
+    #             deployment=deployment,
+    #             message=f"Error al actualizar deployment: {str(e)}",
+    #             log_type='error',
+    #             source='system'
+    #         )
+    #         raise
 
-    def delete_deployment(self, deployment: Deployment) -> None:
-        """Elimina un deployment"""
-        try:
-            DeploymentLog.objects.create(
-                deployment=deployment,
-                message="Iniciando eliminación del deployment",
-                log_type='info',
-                source='system'
-            )
+    # def delete_deployment(self, deployment: Deployment) -> None:
+    #     """Elimina un deployment"""
+    #     try:
+    #         DeploymentLog.objects.create(
+    #             deployment=deployment,
+    #             message="Iniciando eliminación del deployment",
+    #             log_type='info',
+    #             source='system'
+    #         )
 
-            deployment.status = 'deleting'
-            deployment.save()
+    #         deployment.status = 'deleting'
+    #         deployment.save()
 
-            # Eliminar servicio
-            self.aws_service.delete_service(deployment)
+    #         # Eliminar servicio
+    #         self.aws_service.delete_service(deployment)
 
-            # Eliminar deployment de la base de datos
-            deployment.delete()
+    #         # Eliminar deployment de la base de datos
+    #         deployment.delete()
 
-        except Exception as e:
-            deployment.status = 'failed'
-            deployment.save()
-            DeploymentLog.objects.create(
-                deployment=deployment,
-                message=f"Error al eliminar deployment: {str(e)}",
-                log_type='error',
-                source='system'
-            )
-            raise
+    #     except Exception as e:
+    #         deployment.status = 'failed'
+    #         deployment.save()
+    #         DeploymentLog.objects.create(
+    #             deployment=deployment,
+    #             message=f"Error al eliminar deployment: {str(e)}",
+    #             log_type='error',
+    #             source='system'
+    #         )
+    #         raise
 
     def get_deployment_status(self, deployment: Deployment) -> Dict:
         """Obtiene el estado actual del deployment"""

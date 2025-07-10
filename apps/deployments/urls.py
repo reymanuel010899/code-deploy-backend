@@ -2,14 +2,14 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    # Docker Images URLs
-    path('images/', views.list_docker_images, name='list-docker-images'),
-    path('images/create/', views.create_docker_image, name='create-docker-image'),
-    path('images/<int:image_id>/', views.get_docker_image, name='get-docker-image'),
-    path('images/<int:image_id>/update/', views.update_docker_image, name='update-docker-image'),
-    path('images/<int:image_id>/delete/', views.delete_docker_image, name='delete-docker-image'),
-    path('images/<int:image_id>/validate/', views.validate_docker_image, name='validate-docker-image'),
-    path('images/<int:image_id>/details/', views.get_docker_image_details, name='get-docker-image-details'),
+    # # Docker Images URLs
+    # path('images/', views.list_docker_images, name='list-docker-images'),
+    # path('images/create/', views.create_docker_image, name='create-docker-image'),
+    # path('images/<int:image_id>/', views.get_docker_image, name='get-docker-image'),
+    # # path('images/<int:image_id>/update/', views.update_docker_image, name='update-docker-image'),
+    # path('images/<int:image_id>/delete/', views.delete_docker_image, name='delete-docker-image'),
+    # path('images/<int:image_id>/validate/', views.validate_docker_image, name='validate-docker-image'),
+    # path('images/<int:image_id>/details/', views.get_docker_image_details, name='get-docker-image-details'),
     
     # Deployments URLs
     path('deployments/', views.list_deployments, name='list-deployments'),

@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import DockerImage, Deployment
 import uuid
-
+from .services import AWSService
 class DockerImageSerializer(serializers.ModelSerializer):
     full_image_name = serializers.CharField(read_only=True)
     
@@ -13,9 +13,12 @@ class DockerImageSerializer(serializers.ModelSerializer):
 
 
 
-class DockerImageSerializer(serializers.Serializer):
+class ContainerImageSerializer(serializers.Serializer):
     name = serializers.CharField()
     tag = serializers.CharField(required=False)
+
+
+
 
 class ECSConfigSerializer(serializers.Serializer):
     clusterName = serializers.CharField()
@@ -97,20 +100,20 @@ class DeploymentUpdateSerializer(serializers.ModelSerializer):
         ]
 
 class DeploymentDetailSerializer(serializers.ModelSerializer):
-    docker_image = DockerImageSerializer(read_only=True)
-    status_details = serializers.SerializerMethodField()
+    # docker_image = DockerImageSerializer(read_only=True)
+    # status_details = serializers.SerializerMethodField()
     
     class Meta:
         model = Deployment
         fields = [
-            'id', 'name', 'docker_image', 'status', 'status_details',
+            'id', 'name', 'regions', 'docker_images', 'status',
             'created_at', 'updated_at', 'cpu_units', 'memory_mb',
-            'container_name', 'command', 'entrypoint', 'port_mappings',
+             'port_mappings',
             'network_mode', 'environment_variables', 'secrets',
-            'volumes', 'health_check', 'desired_count', 'min_count',
+              'desired_count', 'min_count',
             'max_count'
         ]
-        read_only_fields = ['created_at', 'updated_at', 'status', 'status_details']
+        read_only_fields = ['created_at', 'updated_at', 'status']
     
     def get_status_details(self, obj):
         from .services import DeploymentService
@@ -121,18 +124,27 @@ class DeploymentDetailSerializer(serializers.ModelSerializer):
             return None
 
 class DeploymentListSerializer(serializers.ModelSerializer):
-    docker_image = DockerImageSerializer(read_only=True)
-    status_details = serializers.SerializerMethodField()
-    
+    deploymet_url =  serializers.SerializerMethodField()
     class Meta:
         model = Deployment
         fields = [
-            'id', 'name', 'docker_image', 'status', 'status_details',
+            'id', 'name', 'docker_images', 'regions','status',
             'created_at', 'updated_at', 'cpu_units', 'memory_mb',
-            'desired_count'
+            'desired_count', 'network_mode', 'load_balancer', 'auto_scaling_enabled', 'deploymet_url'
         ]
-        read_only_fields = ['created_at', 'updated_at', 'status', 'status_details']
-    
+        read_only_fields = ['created_at', 'updated_at', 'status']
+        
+    def get_deploymet_url(self, obj):
+        aws_Services = AWSService()
+        public_ip = aws_Services.get_first_task_public_ip(stack_name=f"{obj.name}-stack") 
+        # if public_ip.get("error"):
+        #     return ""
+        
+        deployment = Deployment.objects.get(name=obj.name)
+        deployment.deployment_url = f"http://{public_ip}"
+        deployment.save()
+        return deployment.deployment_url
+
     def get_status_details(self, obj):
         from .services import DeploymentService
         try:

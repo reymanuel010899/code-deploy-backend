@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+import secrets
 load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,7 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv("SECRET_KEY")
+SECRET_KEY = os.getenv("SECRET_KEY") or  secrets.token_urlsafe(50)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -87,6 +88,12 @@ DATABASES = {
         'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+# DB_ENGINE_TYPE = os.environ.get('DATABASE_ENGINE', 'MYSQL').upper()
+# DB_HOST = os.environ.get(f'{DB_ENGINE_TYPE}_HOST', 'localhost')
+# DB_PORT = os.environ.get(f'{DB_ENGINE_TYPE}_PORT')
+# DB_NAME = os.environ.get(f'{DB_ENGINE_TYPE}_DATABASE')
+# DB_USER = os.environ.get(f'{DB_ENGINE_TYPE}_USER')
+# DB_PASSWORD = os.environ.get(f'{DB_ENGINE_TYPE}_PASSWORD')
 # DATABASES = {
 #     'default': {
 #         'ENGINE': 'django.db.backends.postgresql_psycopg2',
