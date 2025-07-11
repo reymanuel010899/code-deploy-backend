@@ -137,6 +137,7 @@ class DeploymentListSerializer(serializers.ModelSerializer):
     def get_deploymet_url(self, obj):
         aws_Services = AWSService()
         public_ip = aws_Services.get_first_task_public_ip(stack_name=f"{obj.name}-stack") 
+        print(public_ip, "----")
         # if public_ip.get("error"):
         #     return ""
         

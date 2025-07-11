@@ -196,6 +196,10 @@ Resources:
             FromPort: 80
             ToPort: 80
             CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: !Ref App1Port
+            ToPort: !Ref App1Port
+            CidrIp: 0.0.0.0/0
 
   ECSLogGroup:
       Type: AWS::Logs::LogGroup
@@ -301,6 +305,10 @@ Resources:
             - UsePrivateRepo
             - CredentialsParameter: !Ref CredetialRepository
             - Ref: AWS::NoValue
+            
+        Environment:
+          - Name: BACKEND_URL
+            Value: !GetAtt ECSALB.DNSName
 
         PortMappings:
           - ContainerPort: !Ref App2Port # ej: 80
@@ -330,7 +338,7 @@ Resources:
         
         Environment:
           - Name: !Sub "${DatabaseEngine}_HOST"
-            Value: DataBase
+            Value: localhost
           - Name: !Sub "${DatabaseEngine}_PORT"
             Value: !Ref DatabasePort
           - Name: !Sub "${DatabaseEngine}_DATABASE"
@@ -372,6 +380,7 @@ Resources:
     Properties:
       Cluster: !Ref ECSCluster
       LaunchType: FARGATE
+      ServiceName: !Ref ECSServiceName  
       DesiredCount: !Ref MinCapacity
       TaskDefinition: !Ref TaskDefinition
       NetworkConfiguration:
@@ -392,6 +401,7 @@ Resources:
     Properties:
       Cluster: !Ref ECSCluster
       LaunchType: FARGATE
+      ServiceName: !Ref ECSServiceName
       DesiredCount: !Ref DesiredTaskCount
       TaskDefinition: !Ref TaskDefinition
       NetworkConfiguration:
@@ -411,6 +421,7 @@ Resources:
       Protocol: HTTP
       Port: !Ref App1Port
       TargetType: ip
+      HealthCheckPath: /
 
   ECSAutoScalingTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
@@ -418,7 +429,7 @@ Resources:
     Properties:
       MaxCapacity: !Ref MaxCapacity
       MinCapacity: !Ref MinCapacity
-      ResourceId: !Sub "service/${ECSCluster}/${ECSServiceName}"
+      ResourceId: !Sub "service/${ClusterName}/${ECSServiceName}"
       RoleARN: !GetAtt ECSExecutionRole.Arn
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
@@ -431,9 +442,30 @@ Resources:
       PolicyType: TargetTrackingScaling
       ScalingTargetId: !Ref ECSAutoScalingTarget
       TargetTrackingScalingPolicyConfiguration:
-        TargetValue: 85.0
+        TargetValue: 90.0
         PredefinedMetricSpecification:
           PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+
+  ECSAutoScalingMemoryPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: AutoScalingEnabledCondition
+    Properties:
+      PolicyName: ECSAutoScalingMemoryPolicy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSAutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 90.0
+        CustomizedMetricSpecification:
+          MetricName: MemoryUtilization
+          Namespace: AWS/ECS
+          Statistic: Average
+          Dimensions:
+            - Name: ServiceName
+              Value: !Ref ECSServiceName
+            - Name: ClusterName
+              Value: !Ref ClusterName
         ScaleInCooldown: 60
         ScaleOutCooldown: 60
 
