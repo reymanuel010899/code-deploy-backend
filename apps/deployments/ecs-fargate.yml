@@ -2,6 +2,10 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: ECS Fargate Cluster usando VPC y subnets existentes
 
 Parameters:
+  ECSExecutionRoleName:
+    Type: String
+    Description: Nombre único y corto para el role IAM
+
   CredetialRepository:
     Type: String
     Description: Nombre de la definición de tarea
@@ -13,16 +17,15 @@ Parameters:
 
   VPCId:
     Type: String
-    Default: vpc-0d1125fbea39e69f4
+    Description: VPC ID para la región
 
   PublicSubnetId:
     Type: String
-    Default: subnet-08739eb429d2fabe8
+    Description: Subnet pública 1
 
   PublicSubnetId2:
     Type: String
-    Description: Segunda Subred Publica para el Load Balancer (en una AZ diferente)
-    Default: subnet-0992517bfc7a9454c 
+    Description: Subnet pública 2
 
   ECSServiceName:
     Type: String
@@ -30,7 +33,8 @@ Parameters:
 
   PrivateSubnetId:
     Type: String
-    Default: subnet-02ad64779efe7a82d
+    Description: Subnet privada (opcional)
+    Default: ""
 
   ClusterName:
     Type: String
@@ -121,7 +125,6 @@ Parameters:
       - AURORA          # Aurora MySQL-compatible
       - AURORA-MYSQL    # Aurora MySQL (nuevo identificador)
       - AURORA-POSTGRESQL # Aurora PostgreSQL
-
     Description: Tipo de motor de base de datos
 
   DatabaseName:
@@ -215,7 +218,7 @@ Resources:
   ECSExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: ecsTaskExecutionRole
+      RoleName: !Ref ECSExecutionRoleName
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -327,7 +330,7 @@ Resources:
         Cpu: !Ref CpuContainer3
         Memory: !Ref MemoryContainer3
         PortMappings:
-          - ContainerPort: !Ref App3Port  # ej: 3306
+          - ContainerPort: !Ref App3Port
             Protocol: tcp
         LogConfiguration:
           LogDriver: awslogs

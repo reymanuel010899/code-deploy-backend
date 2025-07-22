@@ -21,6 +21,7 @@ class ContainerImageSerializer(serializers.Serializer):
 
 
 class ECSConfigSerializer(serializers.Serializer):
+    regions = serializers.ListField(child=serializers.CharField(), required=False)
     clusterName = serializers.CharField()
     IsRepoPrivate = serializers.BooleanField(default=False)
     privateRegistryCredentials = serializers.DictField(required=False)
@@ -137,10 +138,9 @@ class DeploymentListSerializer(serializers.ModelSerializer):
     def get_deploymet_url(self, obj):
         aws_Services = AWSService()
         public_ip = aws_Services.get_first_task_public_ip(stack_name=f"{obj.name}-stack") 
-        print(public_ip, "----")
-        # if public_ip.get("error"):
-        #     return ""
-        
+        if isinstance(public_ip, dict) and "error" in public_ip:
+            return ""
+
         deployment = Deployment.objects.get(name=obj.name)
         deployment.deployment_url = f"http://{public_ip}"
         deployment.save()
