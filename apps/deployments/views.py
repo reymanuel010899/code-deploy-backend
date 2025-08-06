@@ -1,13 +1,18 @@
+import boto3
+import re
+import json
+import time
 from rest_framework.views import APIView
 from rest_framework import status, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from django.shortcuts import get_object_or_404
+from django.conf import settings
 from .services import DeploymentService
 from .models import Deployment
 from .serializers import (
     ContainerImageSerializer, DeploymentCreateSerializer, DeploymentUpdateSerializer,
-    DeploymentDetailSerializer, DeploymentListSerializer,
+    DeploymentDetailSerializer, DeploymentListSerializer, checkDomainSerializer, 
 
 )
 
@@ -192,4 +197,217 @@ def get_deployment_status(request, deployment_id):
         return Response(
             {'error': str(e)},
             status=status.HTTP_400_BAD_REQUEST
+        )
+
+DOMAIN_PATTERN = re.compile(r"^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$")  # validación básica
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def check_domain_availability(request):
+    # Desempaquetar si viene como wrapper (e.g., {'body': '{"domain":"..."}', ...})
+    raw = request.data
+    if isinstance(raw, dict) and 'body' in raw and isinstance(raw['body'], str):
+        try:
+            payload = json.loads(raw['body'])
+            print(f"Raw request data: {payload}")
+        except json.JSONDecodeError:
+            return Response({'error': 'Malformed JSON in body'}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        payload = raw
+
+    serializer = checkDomainSerializer(data=payload)
+    print(serializer.initial_data)  # Imprimir los datos iniciales para depuración
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    domain = serializer.validated_data.get('domain')
+    if not domain or not DOMAIN_PATTERN.match(domain):
+        return Response({'error': 'Domain is required or format invalid'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        client_kwargs = {'region_name': 'us-east-1'}
+        aws_key = getattr(settings, 'AWS_ACCESS_KEY_ID', None)
+        aws_secret = getattr(settings, 'AWS_SECRET_ACCESS_KEY', None)
+        if aws_key and aws_secret:
+            client_kwargs.update({
+                'aws_access_key_id': aws_key,
+                'aws_secret_access_key': aws_secret
+            })
+
+        route53_client = boto3.client('route53domains', **client_kwargs)
+
+        availability_resp = route53_client.check_domain_availability(DomainName=domain)
+        availability = availability_resp.get('Availability')
+
+        result = {'domain': domain, 'available': False, 'message': ''}
+
+        if availability in ('AVAILABLE', 'AVAILABLE_RESERVED', 'AVAILABLE_PREORDER'):
+            result['available'] = True
+            result['message'] = f'Domain {domain} is available for registration'
+            # obtener precio básico del TLD
+            tld = domain.split('.', 1)[-1]
+            try:
+                prices_resp = route53_client.list_prices(Tld=f".{tld}")
+                prices = prices_resp.get('Prices', [])
+                if prices:
+                    price_info = prices[0].get('RegistrationPrice', {})
+                    price = price_info.get('Price')
+                    currency = price_info.get('Currency')
+                    if price is not None:
+                        result['price'] = f"{price} {currency}"
+                    else:
+                        result['price'] = "Unknown"
+                else:
+                    result['price'] = "Unknown"
+            except Exception:
+                result['price'] = "Unknown"
+        else:
+            result['available'] = False
+            result['message'] = f'Domain {domain} is not available for registration'
+            try:
+                suggestions_resp = route53_client.get_domain_suggestions(
+                    DomainName=domain,
+                    SuggestionCount=3,
+                    OnlyAvailable=True
+                )
+                suggestions = [
+                    s.get('DomainName')
+                    for s in suggestions_resp.get('SuggestionsList', [])
+                    if s.get('Availability') == 'AVAILABLE'
+                ]
+                if suggestions:
+                    result['suggestions'] = suggestions
+            except Exception:
+                pass
+
+        return Response(result)
+    except Exception as e:
+        return Response({'error': f'Error checking domain availability: {str(e)}'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def purchase_domain(request):
+    """Purchase domain in Route53 and configure DNS"""
+    domain = request.data.get('domain')
+    load_balancer_dns = request.data.get('load_balancer_dns')
+    
+    if not domain or not load_balancer_dns:
+        return Response(
+            {'error': 'Domain and load balancer DNS are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        # Initialize Route53 Domains client
+        route53_domains_client = boto3.client(
+            'route53domains',
+            region_name='us-east-1',
+            aws_access_key_id=getattr(settings, 'AWS_ACCESS_KEY_ID', None),
+            aws_secret_access_key=getattr(settings, 'AWS_SECRET_ACCESS_KEY', None)
+        )
+        
+        # Initialize Route53 client for DNS management
+        route53_client = boto3.client(
+            'route53',
+            aws_access_key_id=getattr(settings, 'AWS_ACCESS_KEY_ID', None),
+            aws_secret_access_key=getattr(settings, 'AWS_SECRET_ACCESS_KEY', None)
+        )
+        
+        # Register the domain
+        registration_response = route53_domains_client.register_domain(
+            DomainName=domain,
+            DurationInYears=1,
+            AutoRenew=True,
+            AdminContact={
+                'FirstName': 'Admin',
+                'LastName': 'User',
+                'ContactType': 'PERSON',
+                'OrganizationName': 'Your Organization',
+                'AddressLine1': '123 Main St',
+                'City': 'City',
+                'State': 'State',
+                'CountryCode': 'US',
+                'ZipCode': '12345',
+                'PhoneNumber': '+1.1234567890',
+                'Email': 'admin@example.com'
+            },
+            RegistrantContact={
+                'FirstName': 'Admin',
+                'LastName': 'User',
+                'ContactType': 'PERSON',
+                'OrganizationName': 'Your Organization',
+                'AddressLine1': '123 Main St',
+                'City': 'City',
+                'State': 'State',
+                'CountryCode': 'US',
+                'ZipCode': '12345',
+                'PhoneNumber': '+1.1234567890',
+                'Email': 'admin@example.com'
+            },
+            TechContact={
+                'FirstName': 'Admin',
+                'LastName': 'User',
+                'ContactType': 'PERSON',
+                'OrganizationName': 'Your Organization',
+                'AddressLine1': '123 Main St',
+                'City': 'City',
+                'State': 'State',
+                'CountryCode': 'US',
+                'ZipCode': '12345',
+                'PhoneNumber': '+1.1234567890',
+                'Email': 'admin@example.com'
+            }
+        )
+        
+        # Get the hosted zone ID for the domain
+        hosted_zones = route53_client.list_hosted_zones()
+        domain_hosted_zone = None
+        
+        for zone in hosted_zones['HostedZones']:
+            if zone['Name'] == f'{domain}.':
+                domain_hosted_zone = zone
+                break
+        
+        if not domain_hosted_zone:
+            # Create hosted zone for the domain
+            hosted_zone_response = route53_client.create_hosted_zone(
+                Name=domain,
+                CallerReference=f'{domain}-{int(time.time())}'
+            )
+            hosted_zone_id = hosted_zone_response['HostedZone']['Id']
+        else:
+            hosted_zone_id = domain_hosted_zone['Id']
+        
+        # Create A record pointing to the load balancer
+        route53_client.change_resource_record_sets(
+            HostedZoneId=hosted_zone_id,
+            ChangeBatch={
+                'Changes': [
+                    {
+                        'Action': 'UPSERT',
+                        'ResourceRecordSet': {
+                            'Name': domain,
+                            'Type': 'A',
+                            'AliasTarget': {
+                                'HostedZoneId': 'Z35SXDOTRQ7X7K',  # ALB hosted zone ID for us-east-1
+                                'DNSName': load_balancer_dns,
+                                'EvaluateTargetHealth': True
+                            }
+                        }
+                    }
+                ]
+            }
+        )
+        
+        return Response({
+            'success': True,
+            'message': f'Domain {domain} purchased and configured successfully',
+            'operation_id': registration_response.get('OperationId')
+        })
+        
+    except Exception as e:
+        return Response(
+            {'error': f'Error purchasing domain: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )

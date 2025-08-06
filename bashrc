@@ -1,0 +1,5 @@
+alias kubectl="minikube kubectl --"
+alias  mt="minibube start"
+alias venv="source venv/bin/activate"
+alias pmr="python3 manage.py runserver"
+alias pmc="python3 manage.py createsuperuser"

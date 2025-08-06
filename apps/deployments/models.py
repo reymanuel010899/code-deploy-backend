@@ -41,6 +41,7 @@ class Deployment(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='deployments')
     name = models.CharField(max_length=255)
     service = models.CharField(max_length=15, blank=True, null=True)
+    domain_name = models.CharField(max_length=255, blank=True, null=True, help_text="Domain name for the deployment")
     regions = models.JSONField( default=list,
         help_text="List of Docker images in format [{'name': 'image_name', 'tag': 'latest', 'port': 80, 'registry_url': 'docker.io', 'repository_name': 'my_repo'}]",
         blank=True,)

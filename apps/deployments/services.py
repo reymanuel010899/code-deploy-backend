@@ -517,7 +517,7 @@ class DeploymentService:
                 if idx == 0:
                     vpc_id = ecs_config.get('vpc_id', 'vpc-0d1125fbea39e69f4')
                     subnet1 = ecs_config.get('subnet1', 'subnet-08739eb429d2fabe8')
-                    subnet2 = ecs_config.get('subnet2', 'subnet-0992517bfc7a9454c')
+                    subnet2 = ecs_config.get('subnet2', 'subnet-0476bdb4c9a2c83d6')
                 else:
                     vpc_id, subnet1, subnet2 = self.get_or_create_vpc_and_subnets(region)
                 parameters = []
@@ -551,6 +551,42 @@ class DeploymentService:
                 cluster_arns.append({'region': region, 'cluster_arn': cluster_arn, 'vpc_id': vpc_id, 'subnet1': subnet1, 'subnet2': subnet2, 'stack_name': stack_name, 'role_name': role_name})
 
             deployment.aws_cluster_arn = json.dumps(cluster_arns)
+            
+            # Handle domain purchasing if domain name is provided
+            domain_name = ecs_config.get('domain_name')
+            if domain_name:
+                try:
+                    # Wait for the load balancer to be created and get its DNS name
+                    time.sleep(30)  # Give some time for the stack to create resources
+                    
+                    # Get the load balancer DNS name from the first region
+                    if cluster_arns:
+                        first_region = cluster_arns[0]
+                        aws_service = AWSService(first_region['region'])
+                        
+                        # Get load balancer DNS name from CloudFormation outputs
+                        try:
+                            stack_outputs = aws_service.stack_formations.describe_stacks(
+                                StackName=first_region['stack_name']
+                            )['Stacks'][0]['Outputs']
+                            
+                            load_balancer_dns = None
+                            for output in stack_outputs:
+                                if output['OutputKey'] == 'LoadBalancerDNS':
+                                    load_balancer_dns = output['OutputValue']
+                                    break
+                            
+                            if load_balancer_dns:
+                                # Purchase and configure the domain
+                                self.purchase_and_configure_domain(domain_name, load_balancer_dns)
+                                deployment.domain_name = domain_name
+                                deployment.save()
+                        except Exception as e:
+                            logger.error(f"Error getting load balancer DNS: {str(e)}")
+                            
+                except Exception as e:
+                    logger.error(f"Error purchasing domain {domain_name}: {str(e)}")
+            
             threading.Timer(120, self.check_status, ).start()
             deployment.save()
 
@@ -712,3 +748,114 @@ class DeploymentService:
             return
 
         print(f"Dominio '{domain_name}' configurado con SSL pendiente de validación.")
+    
+    def purchase_and_configure_domain(self, domain_name: str, load_balancer_dns: str):
+        """Purchase domain in Route53 and configure DNS to point to load balancer"""
+        try:
+            # Initialize Route53 Domains client
+            route53_domains_client = boto3.client(
+                'route53domains',
+                region_name='us-east-1',
+                aws_access_key_id=getattr(settings, 'AWS_ACCESS_KEY_ID', None),
+                aws_secret_access_key=getattr(settings, 'AWS_SECRET_ACCESS_KEY', None)
+            )
+            
+            # Initialize Route53 client for DNS management
+            route53_client = boto3.client(
+                'route53',
+                aws_access_key_id=getattr(settings, 'AWS_ACCESS_KEY_ID', None),
+                aws_secret_access_key=getattr(settings, 'AWS_SECRET_ACCESS_KEY', None)
+            )
+            
+            # Register the domain
+            registration_response = route53_domains_client.register_domain(
+                DomainName=domain_name,
+                DurationInYears=1,
+                AutoRenew=True,
+                AdminContact={
+                    'FirstName': 'Admin',
+                    'LastName': 'User',
+                    'ContactType': 'PERSON',
+                    'OrganizationName': 'Your Organization',
+                    'AddressLine1': '123 Main St',
+                    'City': 'City',
+                    'State': 'State',
+                    'CountryCode': 'US',
+                    'ZipCode': '12345',
+                    'PhoneNumber': '+1.1234567890',
+                    'Email': 'admin@example.com'
+                },
+                RegistrantContact={
+                    'FirstName': 'Admin',
+                    'LastName': 'User',
+                    'ContactType': 'PERSON',
+                    'OrganizationName': 'Your Organization',
+                    'AddressLine1': '123 Main St',
+                    'City': 'City',
+                    'State': 'State',
+                    'CountryCode': 'US',
+                    'ZipCode': '12345',
+                    'PhoneNumber': '+1.1234567890',
+                    'Email': 'admin@example.com'
+                },
+                TechContact={
+                    'FirstName': 'Admin',
+                    'LastName': 'User',
+                    'ContactType': 'PERSON',
+                    'OrganizationName': 'Your Organization',
+                    'AddressLine1': '123 Main St',
+                    'City': 'City',
+                    'State': 'State',
+                    'CountryCode': 'US',
+                    'ZipCode': '12345',
+                    'PhoneNumber': '+1.1234567890',
+                    'Email': 'admin@example.com'
+                }
+            )
+            
+            # Get the hosted zone ID for the domain
+            hosted_zones = route53_client.list_hosted_zones()
+            domain_hosted_zone = None
+            
+            for zone in hosted_zones['HostedZones']:
+                if zone['Name'] == f'{domain_name}.':
+                    domain_hosted_zone = zone
+                    break
+            
+            if not domain_hosted_zone:
+                # Create hosted zone for the domain
+                hosted_zone_response = route53_client.create_hosted_zone(
+                    Name=domain_name,
+                    CallerReference=f'{domain_name}-{int(time.time())}'
+                )
+                hosted_zone_id = hosted_zone_response['HostedZone']['Id']
+            else:
+                hosted_zone_id = domain_hosted_zone['Id']
+            
+            # Create A record pointing to the load balancer
+            route53_client.change_resource_record_sets(
+                HostedZoneId=hosted_zone_id,
+                ChangeBatch={
+                    'Changes': [
+                        {
+                            'Action': 'UPSERT',
+                            'ResourceRecordSet': {
+                                'Name': domain_name,
+                                'Type': 'A',
+                                'AliasTarget': {
+                                    'HostedZoneId': 'Z35SXDOTRQ7X7K',  # ALB hosted zone ID for us-east-1
+                                    'DNSName': load_balancer_dns,
+                                    'EvaluateTargetHealth': True
+                                }
+                            }
+                        }
+                    ]
+                }
+            )
+            
+            logger.info(f"Domain {domain_name} purchased and configured successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error purchasing domain {domain_name}: {str(e)}")
+            raise

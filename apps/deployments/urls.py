@@ -11,6 +11,10 @@ urlpatterns = [
     # path('images/<int:image_id>/validate/', views.validate_docker_image, name='validate-docker-image'),
     # path('images/<int:image_id>/details/', views.get_docker_image_details, name='get-docker-image-details'),
     
+    # Domain management URLs
+    path('check-domain/', views.check_domain_availability, name='check-domain-availability'),
+    path('purchase-domain/', views.purchase_domain, name='purchase-domain'),
+    
     # Deployments URLs
     path('deployments/', views.list_deployments, name='list-deployments'),
     path('deployments/create/', views.create_deployment, name='create-deployment'),

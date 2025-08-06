@@ -17,7 +17,9 @@ class ContainerImageSerializer(serializers.Serializer):
     name = serializers.CharField()
     tag = serializers.CharField(required=False)
 
-
+class checkDomainSerializer(serializers.Serializer):
+    domain = serializers.CharField()
+    tld = serializers.CharField(required=False, default='com')
 
 
 class ECSConfigSerializer(serializers.Serializer):
