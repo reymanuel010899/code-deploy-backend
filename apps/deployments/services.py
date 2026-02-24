@@ -64,19 +64,33 @@ class AWSService:
                 logger.error(f"Error eliminando stack tras fallo en la creación: {str(delete_exc)}")
                 raise
             raise
+
     def get_first_task_public_ip(self, stack_name: str) -> str:
         try:
             # 1️⃣ Obtener nombre del ECS Cluster desde el Stack
+            print(f"===============>: {stack_name}")
             resources = self.stack_formations.describe_stack_resources(StackName=stack_name)
+            print(resources, "****")
             cluster_name = None
+            service_arn = None
             for res in resources['StackResources']:
                 if res['ResourceType'] == 'AWS::ECS::Cluster':
                     cluster_name = res['PhysicalResourceId']
+                
+                if res['ResourceType'] == 'AWS::ECS::Service':
+                    # El PhysicalResourceId de un AWS::ECS::Service es su ARN completo
+                    service_arn = res['PhysicalResourceId']
+
+                # Solo salimos del bucle si ya encontramos ambos para ahorrar tiempo
+                if cluster_name and service_arn:
                     break
 
             if not cluster_name:
-                raise Exception("No ECS Cluster found in stack.")
-
+                raise Exception(f"No ECS Cluster found in stack: {stack_name}")
+            
+            if not service_arn:
+                logger.warning(f"No ECS Service found in stack: {stack_name}")
+            
             # 2️⃣ Listar las tasks activas en el Cluster
             tasks = self.ecs_client.list_tasks(
                 cluster=cluster_name,
@@ -173,21 +187,156 @@ class AWSService:
             logger.error(f"Error updating service: {str(e)}")
             raise
 
-    def delete_service(self, deployment: Deployment) -> None:
-        """Elimina un servicio ECS"""
+    def get_service_arn_from_stack(self, stack_name: str) -> Optional[str]:
+        """Obtiene el ARN del servicio buscando en los recursos del Stack de CloudFormation"""
         try:
-            self.ecs_client.update_service(
-                cluster=deployment.aws_cluster_arn,
-                service=deployment.aws_service_arn,
-                desiredCount=0
-            )
-            self.ecs_client.delete_service(
-                cluster=deployment.aws_cluster_arn,
-                service=deployment.aws_service_arn
-            )
+            # Pedimos a CloudFormation los recursos del stack
+            resources = self.stack_formations.describe_stack_resources(StackName=stack_name)
+            for res in resources['StackResources']:
+                # El PhysicalResourceId de un recurso AWS::ECS::Service es su ARN completo
+                if res['ResourceType'] == 'AWS::ECS::Service':
+                    return res['PhysicalResourceId']
+            return None
         except Exception as e:
-            logger.error(f"Error deleting service: {str(e)}")
+            logger.error(f"Error buscando service ARN en el stack {stack_name}: {str(e)}")
+            return None
+
+    # def delete_service(self, deployment: Deployment) -> None:
+        """Busca el ARN, lo guarda y elimina el servicio ECS"""
+        try:
+            # 1. Cargar la configuración de regiones/stacks que guardaste como JSON
+            cluster_data = json.loads(deployment.aws_cluster_arn)
+            
+            for item in cluster_data:
+                region = item['region']
+                stack_name = item['stack_name']
+
+                # 2. Intentar obtener el ARN del servicio si no lo tenemos
+   
+                service_arn = item['service_arn']
+                if not service_arn or service_arn == "" or service_arn.startswith('['):
+                    # Si no lo tenemos, lo buscamos en CloudFormation
+                    service_arn = self.get_service_arn_from_stack(stack_name)
+                    
+
+                    if service_arn:
+                        # 3. Guardarlo en el modelo para que ya quede registrado
+                        deployment.aws_service_arn = service_arn
+                        deployment.save()
+                        logger.info(f"ARN recuperado y guardado: {service_arn}")
+                    else:
+                        logger.warning(f"No se encontró un servicio activo en el stack {stack_name}")
+                        continue
+
+                # 4. Proceder con la eliminación usando el ARN recuperado
+                try:
+                    logger.info(f"Iniciando eliminación del servicio {service_arn} en {region}")
+                    # self.get_service_arn_from_stack(stack_name)
+                    # Reducir contador a 0
+                    print("*****************", service_arn)
+                    self.ecs_client.update_service(
+                        cluster=item['cluster_arn'], # O el nombre físico del cluster
+                        service=service_arn,
+                        desiredCount=0
+                    )
+                    
+                    # Opcional: El waiter puede tardar mucho, podrías omitirlo si vas a borrar el stack completo
+                    # self.ecs_client.get_waiter('services_inactive').wait(...)
+
+                    # Eliminar servicio
+                    self.ecs_client.delete_service(
+                        cluster=item['cluster_arn'], 
+                        service=service_arn
+                    )
+                    logger.info(f"Servicio {service_arn} eliminado exitosamente.")
+
+                except Exception as e:
+                    logger.error(f"Error en pasos de borrado ECS: {str(e)}")
+
+        except Exception as e:
+            logger.error(f"Error crítico en delete_service: {str(e)}")
             raise
+    def delete_service(self, deployment: Deployment) -> None:
+        """
+        Elimina el servicio ECS de forma robusta.
+        Extrae los nombres reales del Cluster y Servicio desde el ARN para evitar 
+        errores de validación de Boto3.
+        """
+        try:
+            # 1. Cargar la configuración regional
+            cluster_data = json.loads(deployment.aws_cluster_arn)
+            
+            for item in cluster_data:
+                region = item.get('region', self.region_name)
+                stack_name = item.get('stack_name')
+                # Creamos el cliente regional para asegurar que la API responda en la zona correcta
+                regional_ecs = boto3.client('ecs', region_name=region)
+                regional_cf = boto3.client('cloudformation', region_name=region)
+
+                # 2. Obtener el ARN del servicio (del JSON o buscándolo en el Stack)
+                service_arn = item.get('service_arn')
+                if not service_arn or service_arn == "" or service_arn.startswith('['):
+                    service_arn = self.get_service_arn_from_stack(stack_name)
+
+                if not service_arn:
+                    logger.warning(f"No se encontró servicio activo en el stack {stack_name} de {region}")
+                    # Si no hay servicio, procedemos a intentar borrar el stack de todos modos
+                    self._cleanup_stack(regional_cf, stack_name)
+                    continue
+
+                # 3. LIMPIEZA MAESTRA: Extraer nombres cortos del ARN del Servicio
+                # Formato ARN: arn:aws:ecs:region:account:service/cluster-name/service-name
+                try:
+                    parts = service_arn.split('/')
+                    service_name = parts[-1]  # 'ecs-service'
+                    cluster_name = parts[-2]  # 'estesiii_6e81cf79' (El nombre real del cluster)
+                    
+                    print(f"--- Datos Identificados en {region} ---")
+                    print(f"Cluster detectado: {cluster_name}")
+                    print(f"Service detectado: {service_name}")
+                except IndexError:
+                    # Fallback por si el service_arn no tiene el formato esperado
+                    service_name = service_arn.split('/')[-1]
+                    cluster_name = item.get('cluster_arn').split('/')[-1]
+
+                # 4. Proceso de eliminación en AWS
+                try:
+                    logger.info(f"Deteniendo servicio {service_name} en {cluster_name}...")
+                    
+                    # Paso A: Escalar a 0 (Obligatorio para poder borrar)
+                    regional_ecs.update_service(
+                        cluster=cluster_name,
+                        service=service_name,
+                        desiredCount=0
+                    )
+                    
+                    # Paso B: Borrar el servicio
+                    regional_ecs.delete_service(
+                        cluster=cluster_name, 
+                        service=service_name
+                    )
+                    logger.info(f"Servicio {service_name} borrado de ECS satisfactoriamente.")
+
+                    # Paso C: Borrar el Stack de CloudFormation (Limpieza total de recursos)
+                    self._cleanup_stack(regional_cf, stack_name)
+
+                except regional_ecs.exceptions.ServiceNotFoundException:
+                    logger.warning(f"El servicio {service_name} ya no existe. Limpiando stack...")
+                    self._cleanup_stack(regional_cf, stack_name)
+                except Exception as e:
+                    logger.error(f"Error operando en ECS ({region}): {str(e)}")
+
+        except Exception as e:
+            logger.error(f"Error crítico en delete_service: {str(e)}")
+            raise
+
+    def _cleanup_stack(self, cf_client, stack_name):
+        """Método auxiliar para borrar el stack de CloudFormation"""
+        try:
+            logger.info(f"Iniciando eliminación del Stack: {stack_name}")
+            cf_client.delete_stack(StackName=stack_name)
+        except Exception as e:
+            logger.error(f"No se pudo eliminar el stack {stack_name}: {str(e)}")
 
     def get_service_status(self, deployment: Deployment) -> Dict:
         try:
@@ -345,7 +494,6 @@ class DeploymentService:
             images_backend = environment_variables[1].get("name")
             secret_name = f"{images_backend}_{user.username}_1"
             arn_secret = self.aws_service.create_secret(secret_name, ecs_config.get("privateRegistryCredentials", {}))
-            print(arn_secret)
 
         database_name = ''
         database_user = ''
@@ -413,7 +561,7 @@ class DeploymentService:
                 },
                 {
                     'ParameterKey': 'Image3',
-                    'ParameterValue': docker_images[2].get('name') if len(docker_images) > 2 else None
+                    'ParameterValue': docker_images[2].get('name').lower() if len(docker_images) > 2 else None
                 },
                 {
                     'ParameterKey': 'App1Port',
@@ -515,9 +663,9 @@ class DeploymentService:
             cluster_arns = []
             for idx, region in enumerate(regions):
                 if idx == 0:
-                    vpc_id = ecs_config.get('vpc_id', 'vpc-0d1125fbea39e69f4')
-                    subnet1 = ecs_config.get('subnet1', 'subnet-08739eb429d2fabe8')
-                    subnet2 = ecs_config.get('subnet2', 'subnet-0476bdb4c9a2c83d6')
+                    vpc_id = ecs_config.get('vpc_id', 'vpc-0a0b08c33cea3a18a')
+                    subnet1 = ecs_config.get('subnet1', 'subnet-08090e6b25ac43e90')
+                    subnet2 = ecs_config.get('subnet2', 'subnet-07b334de303749093')
                 else:
                     vpc_id, subnet1, subnet2 = self.get_or_create_vpc_and_subnets(region)
                 parameters = []
@@ -532,11 +680,11 @@ class DeploymentService:
                         parameters.append(param)
                 # Generar un nombre corto y único para el role IAM
                 stack_name = f"{deployment.name}-{region}-stack"
-                if len(stack_name) > 40:
-                    stack_name = stack_name[:40]
+                if len(stack_name) > 100:
+                    stack_name = stack_name[:100]
                 role_name = f"{stack_name}-ecsTaskRole"
-                if len(role_name) > 64:
-                    role_name = role_name[:64]
+                if len(role_name) > 120:
+                    role_name = role_name[:120]
 
                 parameters.append({'ParameterKey': 'ECSExecutionRoleName', 'ParameterValue': role_name})
 
@@ -547,11 +695,13 @@ class DeploymentService:
                 if not any(p['ParameterKey'] == 'PublicSubnetId2' for p in parameters):
                     parameters.append({'ParameterKey': 'PublicSubnetId2', 'ParameterValue': subnet2})
                 aws_service = AWSService(region)
+                service_arn = None
                 cluster_arn = aws_service.create_stack(deployment, parameters, stack_name=stack_name)
-                cluster_arns.append({'region': region, 'cluster_arn': cluster_arn, 'vpc_id': vpc_id, 'subnet1': subnet1, 'subnet2': subnet2, 'stack_name': stack_name, 'role_name': role_name})
-
+                cluster_arns.append({'region': region, 'cluster_arn': cluster_arn, 'vpc_id': vpc_id,'service_arn': service_arn, 'subnet1': subnet1, 'subnet2': subnet2, 'stack_name': stack_name, 'role_name': role_name})
+           
             deployment.aws_cluster_arn = json.dumps(cluster_arns)
-            
+            deployment.regions = json.dumps([region['region'] for region in cluster_arns])
+
             # Handle domain purchasing if domain name is provided
             domain_name = ecs_config.get('domain_name')
             if domain_name:
@@ -613,6 +763,7 @@ class DeploymentService:
             deployment.save()
 
             # Eliminar servicio
+            
             self.aws_service.delete_service(deployment)
 
             # Eliminar deployment de la base de datos

@@ -286,7 +286,7 @@ Resources:
             
         Environment:
           - Name: !Sub "${DatabaseEngine}_HOST"
-            Value: DataBase
+            Value: localhost
           - Name: !Sub "${DatabaseEngine}_PORT"
             Value: !Ref DatabasePort
           - Name: !Sub "${DatabaseEngine}_DATABASE"
@@ -324,7 +324,7 @@ Resources:
             awslogs-region: !Ref AWS::Region
             awslogs-stream-prefix: "website"
 
-      - Name: DataBase
+      - Name: db
         Image: !Ref Image3
         Essential: true
         Cpu: !Ref CpuContainer3

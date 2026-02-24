@@ -91,7 +91,7 @@ def delete_deployment(request, deployment_id):
     deployment_service = DeploymentService()
     try:
         deployment_service.delete_deployment(deployment)
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response({"message": "Deployment deleted successfully"}, status=status.HTTP_200_OK)
     except Exception as e:
         return Response(
             {'error': str(e)},

@@ -14,40 +14,48 @@ from pathlib import Path
 import os
 from datetime import timedelta
 from dotenv import load_dotenv
-import secrets
+
 load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "wCtSTr8BVTyLfJVGSbjodFiB80-9ocGr24J_rYCI2nl6H1mNXzu-bPFtSJazI4IjQvk"
-# or  secrets.token_urlsafe(50)
+SECRET_KEY = os.getenv('SECRET_KEY')
+# SECRET_KEY='django-insecure-3tb8&e-onk23r=gc)e4!6o()=f9&7i%(&2tae@cq)mto@1^c%1'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["http://localhost:3000","http://localhost:3001", 'localhost', '127.0.0.1', "*"]
-
+ALLOWED_HOSTS = ["http://localhost:3000", "http://localhost:3001", 'http://localhost:8000/', "*"]
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+]
 APPEND_SLASH = False 
 
 # Application definition
 
-INSTALLED_APPS = [
+BASE_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+]
+THIRD_PARTY_APPS = [
     'rest_framework',
     'corsheaders',
+]
+
+CUSTOM_APPS = [
     'apps.users',
     'apps.deployments',
 ]
+
+INSTALLED_APPS = BASE_APPS + THIRD_PARTY_APPS + CUSTOM_APPS
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
@@ -97,14 +105,15 @@ DATABASES = {
 # DB_NAME = os.environ.get(f'{DB_ENGINE_TYPE}_DATABASE')
 # DB_USER = os.environ.get(f'{DB_ENGINE_TYPE}_USER')
 # DB_PASSWORD = os.environ.get(f'{DB_ENGINE_TYPE}_PASSWORD')
+
 # DATABASES = {
 #     'default': {
 #         'ENGINE': 'django.db.backends.postgresql_psycopg2',
-#         'NAME': 'deploydb',  # Cambia si usas otra base de datos
-#         'USER': 'deployuser',
-#         'PASSWORD': 'reymanuel010899',
+#         'NAME':  'dbname',
+#         'USER': 'dbuser',
+#         'PASSWORD': '123456',
 #         'HOST': 'localhost',
-#         'PORT': '5432',
+#         'PORT':'5432',
 #     }
 # }
 
@@ -172,7 +181,7 @@ SIMPLE_JWT = {
 # AWS Configuration
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
-AWS_DEFAULT_REGION = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+AWS_DEFAULT_REGION = os.getenv('AWS_DEFAULT_REGION', 'us-east-2')
 
 # AWS ECS Configuration
 AWS_ECS_CLUSTER_NAME = os.getenv('AWS_ECS_CLUSTER_NAME', 'default')

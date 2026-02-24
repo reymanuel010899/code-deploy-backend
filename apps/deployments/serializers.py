@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import DockerImage, Deployment
+from botocore.exceptions import ClientError # Importante añadir esta importación
 import uuid
 from .services import AWSService
 class DockerImageSerializer(serializers.ModelSerializer):
@@ -63,14 +64,15 @@ class DeploymentCreateSerializer(serializers.Serializer):
         ecs_data = validated_data.pop('ecs_config')
         docker_images = validated_data.pop('docker_images')
         user = self.context['request'].user
-
+        service = 'ec2' if validated_data.get('service') == 'ecs' else validated_data.get('service')
         deployment = Deployment.objects.create(
             user=user,
-            aws_cluster_arn= f"{ecs_data.get('clusterName')}_{str(uuid.uuid4())[:8]}",
+            aws_cluster_arn=f"{ecs_data.get('clusterName')}_{str(uuid.uuid4())[:8]}",
             name=ecs_data.get('clusterName') + "-deploy",
             cpu_units=ecs_data.get('taskCpu'),
             memory_mb=ecs_data.get('taskMemory'),
             docker_images=docker_images,
+            service=service,
             auto_scaling_enabled= ecs_data.get('autoScaling', False),
             load_balancer = ecs_data.get('loadBalancer', False),
             desired_count=ecs_data.get('desiredCount', 1),
@@ -131,22 +133,43 @@ class DeploymentListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Deployment
         fields = [
-            'id', 'name', 'docker_images', 'regions','status',
+            'id', 'name',  'regions','status','service',
             'created_at', 'updated_at', 'cpu_units', 'memory_mb',
-            'desired_count', 'network_mode', 'load_balancer', 'auto_scaling_enabled', 'deploymet_url'
+            'deploymet_url'
         ]
         read_only_fields = ['created_at', 'updated_at', 'status']
         
     def get_deploymet_url(self, obj):
         aws_Services = AWSService()
-        public_ip = aws_Services.get_first_task_public_ip(stack_name=f"{obj.name}-stack") 
-        if isinstance(public_ip, dict) and "error" in public_ip:
-            return ""
+        stack_name = f"{obj.name}-{obj.aws_region}-stack"
 
-        deployment = Deployment.objects.get(name=obj.name)
-        deployment.deployment_url = f"http://{public_ip}"
-        deployment.save()
-        return deployment.deployment_url
+        try:
+            # Intentamos obtener la IP
+            public_ip = aws_Services.get_first_task_public_ip(stack_name=stack_name)
+            print(f"Public IP obtenida para {stack_name}: {public_ip}")
+            # Validamos si la respuesta es un error manejado por tu service
+            if isinstance(public_ip, dict) and "error" in public_ip:
+                return obj.deployment_url or ""
+            if public_ip and obj.status != "running":
+                obj.status = "running"
+                obj.save()
+
+            # Si todo bien, actualizamos la URL en BD
+            if public_ip:
+                obj.deployment_url = f"http://{public_ip}"
+                obj.save()
+                return obj.deployment_url
+                
+        except ClientError as e:
+            # Si AWS dice que el stack no existe, capturamos el error aquí
+            print(f"Error en AWS para {stack_name}: {e}")
+            return obj.deployment_url or ""
+        except Exception as e:
+            # Cualquier otro error inesperado
+            print(f"Error inesperado: {e}")
+            return obj.deployment_url or ""
+            
+        return obj.deployment_url or ""
 
     def get_status_details(self, obj):
         from .services import DeploymentService

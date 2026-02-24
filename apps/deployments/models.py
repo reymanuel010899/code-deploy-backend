@@ -66,8 +66,8 @@ class Deployment(models.Model):
 
     # AWS ECS Fargate specific fields
     aws_task_arn = models.CharField(max_length=255, null=True, blank=True)
-    aws_cluster_arn = models.CharField(max_length=255, null=True, blank=True)
-    aws_service_arn = models.CharField(max_length=255, null=True, blank=True)
+    aws_cluster_arn = models.CharField(max_length=550, null=True, blank=True)
+    aws_service_arn = models.CharField(max_length=550, null=True, blank=True)
     aws_region = models.CharField(max_length=50, default='us-east-1')
     
 
