@@ -23,9 +23,17 @@ class checkDomainSerializer(serializers.Serializer):
     tld = serializers.CharField(required=False, default='com')
 
 
+class SchedulerConfigSerializer(serializers.Serializer):
+    enabled = serializers.BooleanField(required=False, default=False)
+    start_cron = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    stop_cron = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    start_desired_count = serializers.IntegerField(required=False, min_value=1)
+
+
 class ECSConfigSerializer(serializers.Serializer):
     regions = serializers.ListField(child=serializers.CharField(), required=False)
     clusterName = serializers.CharField()
+    domain_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     IsRepoPrivate = serializers.BooleanField(default=False)
     privateRegistryCredentials = serializers.DictField(required=False)
     taskCpu = serializers.IntegerField()
@@ -53,7 +61,7 @@ class ECSConfigSerializer(serializers.Serializer):
     healthCheckInterval = serializers.IntegerField()
     healthCheckTimeout = serializers.IntegerField()
     healthCheckRetries = serializers.IntegerField()
-
+    scheduler = SchedulerConfigSerializer(required=False)
 
 class DeploymentCreateSerializer(serializers.Serializer):
     service = serializers.CharField()

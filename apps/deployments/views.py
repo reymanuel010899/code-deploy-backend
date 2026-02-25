@@ -34,6 +34,8 @@ def list_deployments(request):
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def create_deployment(request):
+    print(request.data)
+
     serializer = DeploymentCreateSerializer(data=request.data, context={'request': request})
     if serializer.is_valid():
         try:

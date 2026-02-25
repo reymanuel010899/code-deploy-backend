@@ -379,6 +379,103 @@ class DeploymentService:
         self.aws_service = AWSService()
         self.database_engine = 'MYSQL'
 
+    def _normalize_schedule_expression(self, schedule: str):
+        """
+        Accepts 'cron(...)' / 'rate(...)' or a raw cron body like '0 8 * * ? *'
+        and returns an Application Auto Scaling compatible expression.
+        """
+        if not schedule:
+            return None
+        schedule = str(schedule).strip()
+        if not schedule:
+            return None
+        if schedule.startswith("cron(") or schedule.startswith("rate("):
+            return schedule
+        return f"cron({schedule})"
+
+    def configure_ecs_scheduler(self, deployment: Deployment, ecs_config: dict, cluster_name: str, service_name: str, regions: list):
+        """
+        Configures scheduled start/stop for an ECS service using Application Auto Scaling scheduled actions.
+        This is the closest AWS-native "scheduler" for ECS desired count.
+        """
+        scheduler = ecs_config.get("scheduler") or {}
+        if not isinstance(scheduler, dict) or not scheduler.get("enabled"):
+            return
+
+        start_schedule = self._normalize_schedule_expression(scheduler.get("start_cron"))
+        stop_schedule = self._normalize_schedule_expression(scheduler.get("stop_cron"))
+
+        start_desired = scheduler.get("start_desired_count") or ecs_config.get("desiredCount") or 1
+        try:
+            start_desired = int(start_desired)
+        except Exception:
+            start_desired = 1
+        start_desired = max(1, start_desired)
+
+        max_capacity = ecs_config.get("maxCapacity") or start_desired
+        try:
+            max_capacity = int(max_capacity)
+        except Exception:
+            max_capacity = start_desired
+        max_capacity = max(start_desired, max_capacity)
+
+        resource_id = f"service/{cluster_name}/{service_name}"
+
+        for region in regions or ["us-east-1"]:
+            aws = AWSService(region)
+
+            # Register scalable target (needed for scheduled actions)
+            # Retry because the ECS service may still be creating via CloudFormation.
+            last_error = None
+            for _ in range(12):
+                try:
+                    aws.autoscaling_client.register_scalable_target(
+                        ServiceNamespace="ecs",
+                        ResourceId=resource_id,
+                        ScalableDimension="ecs:service:DesiredCount",
+                        MinCapacity=0,
+                        MaxCapacity=max_capacity,
+                    )
+                    last_error = None
+                    break
+                except Exception as e:
+                    last_error = e
+                    time.sleep(10)
+
+            if last_error:
+                logger.error(f"Scheduler: failed to register scalable target for {resource_id} in {region}: {last_error}")
+                continue
+
+            # Stop action (scale to 0)
+            if stop_schedule:
+                stop_action_name = f"{deployment.id}-{region}-stop"
+                try:
+                    aws.autoscaling_client.put_scheduled_action(
+                        ServiceNamespace="ecs",
+                        ScheduledActionName=stop_action_name,
+                        ResourceId=resource_id,
+                        ScalableDimension="ecs:service:DesiredCount",
+                        Schedule=stop_schedule,
+                        ScalableTargetAction={"MinCapacity": 0, "MaxCapacity": 0},
+                    )
+                except Exception as e:
+                    logger.error(f"Scheduler: failed to create stop scheduled action for {resource_id} in {region}: {e}")
+
+            # Start action (scale to N)
+            if start_schedule:
+                start_action_name = f"{deployment.id}-{region}-start"
+                try:
+                    aws.autoscaling_client.put_scheduled_action(
+                        ServiceNamespace="ecs",
+                        ScheduledActionName=start_action_name,
+                        ResourceId=resource_id,
+                        ScalableDimension="ecs:service:DesiredCount",
+                        Schedule=start_schedule,
+                        ScalableTargetAction={"MinCapacity": start_desired, "MaxCapacity": start_desired},
+                    )
+                except Exception as e:
+                    logger.error(f"Scheduler: failed to create start scheduled action for {resource_id} in {region}: {e}")
+
     def get_or_create_vpc_and_subnets(self, region):
         ec2 = boto3.client('ec2', region_name=region)
         # 1. Buscar VPC existente (preferiblemente la default)
@@ -490,6 +587,7 @@ class DeploymentService:
 
     # Crea un deployment en AWS ECS
     def create_deployment(self, deployment: Deployment, docker_images: list, environment_variables: list, ecs_config: dict, user: User) -> None:
+        cluster_name_for_scheduler = deployment.aws_cluster_arn
         if ecs_config.get("IsRepoPrivate"):
             images_backend = environment_variables[1].get("name")
             secret_name = f"{images_backend}_{user.username}_1"
@@ -736,6 +834,19 @@ class DeploymentService:
                             
                 except Exception as e:
                     logger.error(f"Error purchasing domain {domain_name}: {str(e)}")
+
+            # Configure scheduler (start/stop) if enabled
+            try:
+                service_name_for_scheduler = ecs_config.get("serviceName") or "ecs-service"
+                self.configure_ecs_scheduler(
+                    deployment=deployment,
+                    ecs_config=ecs_config,
+                    cluster_name=cluster_name_for_scheduler,
+                    service_name=service_name_for_scheduler,
+                    regions=ecs_config.get("regions", ["us-east-1"]),
+                )
+            except Exception as e:
+                logger.error(f"Error configuring scheduler: {str(e)}")
             
             threading.Timer(120, self.check_status, ).start()
             deployment.save()
