@@ -1,6 +1,9 @@
+import logging
 from django.http import JsonResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from django.utils.deprecation import MiddlewareMixin
+
+logger = logging.getLogger(__name__)
 
 class JWTValidationMiddleware(MiddlewareMixin):
     def process_request(self, request):
@@ -23,7 +26,7 @@ class JWTValidationMiddleware(MiddlewareMixin):
                 if isinstance(header, bytes):
                     header = header.decode('utf-8')
 
-                print("Validando JWT...", header)
+                logger.debug("Validando JWT para: %s", request.path)
 
                 # Quita el prefijo 'Bearer ' para obtener solo el token
                 if header.startswith("Bearer "):
@@ -40,7 +43,7 @@ class JWTValidationMiddleware(MiddlewareMixin):
                 request.user = user
 
             except Exception as e:
-                print("Error al validar el token JWT:", str(e))
+                logger.warning("Error al validar el token JWT: %s", str(e))
                 return JsonResponse({
                     'error': 'Invalid or expired token',
                     'details': str(e),

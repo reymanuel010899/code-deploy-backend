@@ -11,8 +11,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia el resto del código del proyecto
 COPY . .
 
+# Dar permisos al entrypoint
+RUN chmod +x entrypoint.sh
+
 # Expone el puerto por defecto de Django
 EXPOSE 8000
 
 # Comando por defecto para correr el servidor
-CMD ["sh", "-c", "sleep 10 && python manage.py runserver 0.0.0.0:8000"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

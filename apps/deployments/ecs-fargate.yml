@@ -180,7 +180,27 @@ Parameters:
   DesiredTaskCount:
     Type: Number
     Default: 1
-    Description: Capacidad máxima para Auto Scaling
+    Description: Numero de tareas deseadas
+
+  HealthCheckPath:
+    Type: String
+    Default: /
+    Description: Ruta para el health check del ELB
+
+  HealthCheckInterval:
+    Type: Number
+    Default: 30
+    Description: Intervalo del health check
+
+  HealthCheckTimeout:
+    Type: Number
+    Default: 5
+    Description: Timeout del health check
+
+  HealthCheckRetries:
+    Type: Number
+    Default: 3
+    Description: Reintentos del health check
     
 Conditions:
   LoadBalancerEnabledCondition: !Equals [!Ref LoadBalancerEnabled, "true"]
@@ -204,12 +224,6 @@ Resources:
             ToPort: !Ref App1Port
             CidrIp: 0.0.0.0/0
 
-  ECSLogGroup:
-      Type: AWS::Logs::LogGroup
-      Properties:
-        LogGroupName: !Sub "/ecs/${ClusterName}"
-        RetentionInDays: 7
-
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
@@ -218,7 +232,6 @@ Resources:
   ECSExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Ref ECSExecutionRoleName
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -236,12 +249,15 @@ Resources:
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
+                Resource: "*"
+              - Effect: Allow
+                Action:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                   - logs:DescribeLogStreams
-                Resource: 
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${ClusterName}:*"
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/${ClusterName}"
+                Resource:
+                  - !Sub "arn:aws:logs:*:${AWS::AccountId}:log-group:/ecs/${ClusterName}:*"
+                  - !Sub "arn:aws:logs:*:${AWS::AccountId}:log-group:/ecs/${ClusterName}"
         - PolicyName: AllowSecretsManagerAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -283,10 +299,11 @@ Resources:
             awslogs-group: !Sub "/ecs/${ClusterName}"
             awslogs-region: !Ref AWS::Region
             awslogs-stream-prefix: "webserver"
+            awslogs-create-group: "true"
             
         Environment:
           - Name: !Sub "${DatabaseEngine}_HOST"
-            Value: localhost
+            Value: !Ref DatabaseHost
           - Name: !Sub "${DatabaseEngine}_PORT"
             Value: !Ref DatabasePort
           - Name: !Sub "${DatabaseEngine}_DATABASE"
@@ -295,8 +312,31 @@ Resources:
             Value: !Ref DatabaseUser
           - Name: !Sub "${DatabaseEngine}_PASSWORD"
             Value: !Ref DatabasePassword
-          - Name: !Sub "${DatabaseEngine}_ROOT_PASSWORD"
-            Value: !Ref DatabaseRootPassword
+          - Name: BACKEND_URL
+            Value:
+              Fn::If:
+                - LoadBalancerEnabledCondition
+                - !GetAtt ECSALB.DNSName
+                - "localhost"
+          - Name: DATABASE_ENGINE
+            Value: !Ref DatabaseEngine
+          - Name: DB_HOST
+            Value: !Ref DatabaseHost
+          - Name: DB_PORT
+            Value: !Ref DatabasePort
+          - Name: DB_NAME
+            Value: !Ref DatabaseName
+          - Name: DB_USER
+            Value: !Ref DatabaseUser
+          - Name: DB_PASSWORD
+            Value: !Ref DatabasePassword
+          # Para compatibilidad con Postgres oficial
+          - Name: POSTGRES_DB
+            Value: !Ref DatabaseName
+          - Name: POSTGRES_USER
+            Value: !Ref DatabaseUser
+          - Name: POSTGRES_PASSWORD
+            Value: !Ref DatabasePassword
 
       - Name: Website  # frontend
         Image: !Ref Image2
@@ -310,12 +350,16 @@ Resources:
             - Ref: AWS::NoValue
             
         Environment:
-          - Name: BACKEND_URL
-            Value: !GetAtt ECSALB.DNSName
+          - Name: NEXT_PUBLIC_BACKEND_URL
+            Value:
+              Fn::If:
+                - LoadBalancerEnabledCondition
+                - !GetAtt ECSALB.DNSName
+                - "localhost"
 
         PortMappings:
           - ContainerPort: !Ref App2Port # ej: 80
-            hostPort: !Ref App2Port
+            HostPort: !Ref App2Port
             Protocol: tcp
         LogConfiguration:
           LogDriver: awslogs
@@ -323,6 +367,7 @@ Resources:
             awslogs-group: !Sub "/ecs/${ClusterName}"
             awslogs-region: !Ref AWS::Region
             awslogs-stream-prefix: "website"
+            awslogs-create-group: "true"
 
       - Name: db
         Image: !Ref Image3
@@ -338,6 +383,7 @@ Resources:
             awslogs-group: !Sub "/ecs/${ClusterName}"
             awslogs-region: !Ref AWS::Region
             awslogs-stream-prefix: "database"
+            awslogs-create-group: "true"
         
         Environment:
           - Name: !Sub "${DatabaseEngine}_HOST"
@@ -351,6 +397,22 @@ Resources:
           - Name: !Sub "${DatabaseEngine}_PASSWORD"
             Value: !Ref DatabasePassword
           - Name: !Sub "${DatabaseEngine}_ROOT_PASSWORD"
+            Value: !Ref DatabaseRootPassword
+          # Para compatibilidad con Postgres oficial
+          - Name: POSTGRES_DB
+            Value: !Ref DatabaseName
+          - Name: POSTGRES_USER
+            Value: !Ref DatabaseUser
+          - Name: POSTGRES_PASSWORD
+            Value: !Ref DatabasePassword
+          # Para compatibilidad con MySQL oficial
+          - Name: MYSQL_DATABASE
+            Value: !Ref DatabaseName
+          - Name: MYSQL_USER
+            Value: !Ref DatabaseUser
+          - Name: MYSQL_PASSWORD
+            Value: !Ref DatabasePassword
+          - Name: MYSQL_ROOT_PASSWORD
             Value: !Ref DatabaseRootPassword
 
   ECSALB:
@@ -373,19 +435,44 @@ Resources:
       Protocol: HTTP
       DefaultActions:
         - Type: forward
-          TargetGroupArn: !Ref ECSTargetGroup
+          TargetGroupArn: !Ref FETargetGroup
 
-
-  ECSServiceWithLB:
-    Type: AWS::ECS::Service
+  ECSALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Condition: LoadBalancerEnabledCondition
-    DependsOn: ECSALBListener
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BETargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/*
+            - /media/*
+            - /static/*
+      ListenerArn: !Ref ECSALBListener
+      Priority: 1
+
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ECSCluster
+      - TaskDefinition
     Properties:
       Cluster: !Ref ECSCluster
       LaunchType: FARGATE
-      ServiceName: !Ref ECSServiceName  
-      DesiredCount: !Ref MinCapacity
+      ServiceName: !Ref ECSServiceName
+      DesiredCount: !Ref DesiredTaskCount
       TaskDefinition: !Ref TaskDefinition
+      HealthCheckGracePeriodSeconds:
+        Fn::If:
+          - LoadBalancerEnabledCondition
+          - 120
+          - !Ref AWS::NoValue
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 50
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
@@ -394,29 +481,34 @@ Resources:
           SecurityGroups:
             - !Ref InstanceSecurityGroup
       LoadBalancers:
-        - ContainerName: WebServer
-          ContainerPort: !Ref App1Port
-          TargetGroupArn: !Ref ECSTargetGroup
+        Fn::If:
+          - LoadBalancerEnabledCondition
+          - - ContainerName: Website
+              ContainerPort: !Ref App2Port
+              TargetGroupArn: !Ref FETargetGroup
+            - ContainerName: WebServer
+              ContainerPort: !Ref App1Port
+              TargetGroupArn: !Ref BETargetGroup
+          - !Ref AWS::NoValue
 
-  ECSServiceNoLB:
-    Type: AWS::ECS::Service
-    Condition: LoadBalancerDisabledCondition
+
+  FETargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: LoadBalancerEnabledCondition
     Properties:
-      Cluster: !Ref ECSCluster
-      LaunchType: FARGATE
-      ServiceName: !Ref ECSServiceName
-      DesiredCount: !Ref DesiredTaskCount
-      TaskDefinition: !Ref TaskDefinition
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          AssignPublicIp: ENABLED
-          Subnets:
-            - !Ref PublicSubnetId
-          SecurityGroups:
-            - !Ref InstanceSecurityGroup
+      VpcId: !Ref VPCId
+      Protocol: HTTP
+      Port: !Ref App2Port
+      TargetType: ip
+      HealthCheckPath: /
+      Matcher:
+        HttpCode: 200-399
+      HealthCheckIntervalSeconds: !Ref HealthCheckInterval
+      HealthCheckTimeoutSeconds: !Ref HealthCheckTimeout
+      HealthyThresholdCount: !Ref HealthCheckRetries
+      UnhealthyThresholdCount: !Ref HealthCheckRetries
 
-
-  ECSTargetGroup:
+  BETargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Condition: LoadBalancerEnabledCondition
     Properties:
@@ -424,11 +516,18 @@ Resources:
       Protocol: HTTP
       Port: !Ref App1Port
       TargetType: ip
-      HealthCheckPath: /
+      HealthCheckPath: !Ref HealthCheckPath
+      Matcher:
+        HttpCode: 200-399
+      HealthCheckIntervalSeconds: !Ref HealthCheckInterval
+      HealthCheckTimeoutSeconds: !Ref HealthCheckTimeout
+      HealthyThresholdCount: !Ref HealthCheckRetries
+      UnhealthyThresholdCount: !Ref HealthCheckRetries
 
   ECSAutoScalingTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
     Condition: AutoScalingEnabledCondition
+    DependsOn: ECSService
     Properties:
       MaxCapacity: !Ref MaxCapacity
       MinCapacity: !Ref MinCapacity

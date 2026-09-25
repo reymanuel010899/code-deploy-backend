@@ -45,7 +45,12 @@ class Deployment(models.Model):
     regions = models.JSONField( default=list,
         help_text="List of Docker images in format [{'name': 'image_name', 'tag': 'latest', 'port': 80, 'registry_url': 'docker.io', 'repository_name': 'my_repo'}]",
         blank=True,)
-    deployment_url = models.CharField(max_length=50, blank=True)
+    deployment_url = models.CharField(max_length=500, blank=True)
+    region_urls = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of {region, url} per deployed region"
+    )
     # docker_image = models.ForeignKey(DockerImage, on_delete=models.PROTECT, blank=True, null=True, related_name='deployments')
     docker_images = models.JSONField(
         default=list,
@@ -63,6 +68,9 @@ class Deployment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
+
+    # Lambda config — stores runtime, handler, codeFiles, etc. for the last deployed version
+    lambda_config = models.JSONField(default=dict, blank=True, null=True)
 
     # AWS ECS Fargate specific fields
     aws_task_arn = models.CharField(max_length=255, null=True, blank=True)

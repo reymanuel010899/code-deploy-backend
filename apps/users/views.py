@@ -18,6 +18,7 @@ def register(request):
     email = request.data.get('email')
     if not username or not password:
         return Response({'error': 'Username and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        
     if User.objects.filter(username=username).exists():
         return Response({'error': 'Username already exists.'}, status=status.HTTP_400_BAD_REQUEST)
     user = User.objects.create_user(username=username, password=password, email=email)
@@ -37,3 +38,5 @@ def login(request):
         })
     else:
         return Response({'error': 'Invalid credentials.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+

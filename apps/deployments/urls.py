@@ -20,6 +20,7 @@ urlpatterns = [
     path('deployments/create/', views.create_deployment, name='create-deployment'),
     path('deployments/<int:deployment_id>/', views.get_deployment, name='get-deployment'),
     path('deployments/<int:deployment_id>/update/', views.update_deployment, name='update-deployment'),
+    path('deployments/<int:deployment_id>/redeploy/', views.redeploy_ecs, name='redeploy-ecs'),
     path('deployments/<int:deployment_id>/delete/', views.delete_deployment, name='delete-deployment'),
     path('deployments/<int:deployment_id>/scale/', views.scale_deployment, name='scale-deployment'),
     path('deployments/<int:deployment_id>/stop/', views.stop_deployment, name='stop-deployment'),
@@ -27,4 +28,11 @@ urlpatterns = [
     path('deployments/<int:deployment_id>/logs/', views.get_deployment_logs, name='get-deployment-logs'),
     path('deployments/<int:deployment_id>/metrics/', views.get_deployment_metrics, name='get-deployment-metrics'),
     path('deployments/<int:deployment_id>/status/', views.get_deployment_status, name='get-deployment-status'),
-] 
+    path('lambda/functions/', views.list_lambda_functions, name='list-lambda-functions'),
+    path('lambda/functions/<int:deployment_id>/update/', views.update_lambda_function, name='update-lambda-function'),
+    path('lambda/functions/<int:deployment_id>/logs/', views.get_lambda_logs, name='get-lambda-logs'),
+    path('lambda/functions/<int:deployment_id>/metrics/', views.get_lambda_metrics, name='get-lambda-metrics'),
+    path('dockerhub/login/', views.dockerhub_login, name='dockerhub-login'),
+    path('dockerhub/repositories/', views.dockerhub_repositories, name='dockerhub-repositories'),
+    path('dockerhub/tags/', views.dockerhub_tags, name='dockerhub-tags'),
+]
