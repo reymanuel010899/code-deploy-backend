@@ -2,17 +2,39 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: ECS Fargate Cluster usando VPC y subnets existentes
 
 Parameters:
+  ECSExecutionRoleName:
+    Type: String
+    Description: Nombre único y corto para el role IAM
+
+  CredetialRepository:
+    Type: String
+    Description: Nombre de la definición de tarea
+
+  IsPrivateRepo:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+
   VPCId:
     Type: String
-    Default: vpc-0d1125fbea39e69f4
+    Description: VPC ID para la región
 
   PublicSubnetId:
     Type: String
-    Default: subnet-08739eb429d2fabe8
+    Description: Subnet pública 1
+
+  PublicSubnetId2:
+    Type: String
+    Description: Subnet pública 2
+
+  ECSServiceName:
+    Type: String
+    Default: ecs-service
 
   PrivateSubnetId:
     Type: String
-    Default: subnet-02ad64779efe7a82d
+    Description: Subnet privada (opcional)
+    Default: ""
 
   ClusterName:
     Type: String
@@ -39,6 +61,37 @@ Parameters:
     AllowedValues: ['256', '512', '1024', '2048', '4096']
     Description: CPU para la tarea
 
+  # Memory for the task in MB
+  CpuContainer1:
+    Type: String
+    AllowedValues: ['128','256', '512', '1024', '2048', '4096']
+    Description: CPU (en unidades) para el contenedor 1
+
+  CpuContainer2:
+    Type: String
+    AllowedValues: ['128','256', '512', '1024', '2048', '4096']
+    Description: CPU (en unidades) para el contenedor 2 
+
+  CpuContainer3:
+    Type: String
+    AllowedValues: ['128','256', '512', '1024', '2048', '4096']
+    Description: CPU (en unidades) para el contenedor 3
+
+  MemoryContainer1:
+    Type: String
+    AllowedValues: ['128','256', '512', '1024', '2048', '3072', '4096', '5120', '6144', '7168', '8192']
+    Description: RAM (en MB) para el contenedor 1
+
+  MemoryContainer2:
+    Type: String
+    AllowedValues: ['128','256', '512', '1024', '2048', '3072', '4096', '5120', '6144', '7168', '8192']
+    Description: RAM (en MB) para el contenedor 2
+
+  MemoryContainer3:
+    Type: String
+    AllowedValues: ['128','256', '512', '1024', '2048', '3072', '4096', '5120', '6144', '7168', '8192']
+    Description: RAM (en MB) para el contenedor 2
+
   Memory:
     Type: String
     AllowedValues: ['512', '1024', '2048', '3072', '4096', '5120', '6144', '7168', '8192']
@@ -56,8 +109,106 @@ Parameters:
     Type: Number
     Description: Puerto para el contenedor 3
 
-Resources:
+  DatabaseEngine:
+    Type: String
+    Default: MYSQL
+    AllowedValues:
+      - POSTGRES
+      - MYSQL
+      - MARIADB
+      - ORACLE-SE2      # Oracle Standard Edition Two
+      - ORACLE-EE       # Oracle Enterprise Edition
+      - SQLSERVER-EE    # SQL Server Enterprise Edition
+      - SQLSERVER-SE    # SQL Server Standard Edition
+      - SQLSERVER-EX    # SQL Server Express Edition
+      - SQLSERVER-WEB   # SQL Server Web Edition
+      - AURORA          # Aurora MySQL-compatible
+      - AURORA-MYSQL    # Aurora MySQL (nuevo identificador)
+      - AURORA-POSTGRESQL # Aurora PostgreSQL
+    Description: Tipo de motor de base de datos
 
+  DatabaseName:
+    Type: String
+    Description: Nombre de la base de datos
+
+  DatabaseUser:
+    Type: String
+    Description: Usuario de la base de datos
+
+  DatabasePassword:
+    Type: String
+    Description: Contraseña del usuario de la base de datos
+
+  DatabaseRootPassword:
+    Type: String
+    Description: Contraseña del usuario de la base de datos
+
+  DatabaseHost:
+    Type: String
+    Description: Contraseña del root de la base de datos
+
+  DatabasePort:
+    Type: String
+    Description: Puerto de la base de datos
+
+  LoadBalancerEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Habilitar Load Balancer
+
+  AutoScalingEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Habilitar Auto Scaling
+
+  MinCapacity:
+    Type: Number
+    Default: 1
+    Description: Capacidad mínima para Auto Scaling
+
+  MaxCapacity:
+    Type: Number
+    Default: 3
+    Description: Capacidad máxima para Auto Scaling
+
+  DesiredTaskCount:
+    Type: Number
+    Default: 1
+    Description: Numero de tareas deseadas
+
+  HealthCheckPath:
+    Type: String
+    Default: /
+    Description: Ruta para el health check del ELB
+
+  HealthCheckInterval:
+    Type: Number
+    Default: 30
+    Description: Intervalo del health check
+
+  HealthCheckTimeout:
+    Type: Number
+    Default: 5
+    Description: Timeout del health check
+
+  HealthCheckRetries:
+    Type: Number
+    Default: 3
+    Description: Reintentos del health check
+    
+Conditions:
+  LoadBalancerEnabledCondition: !Equals [!Ref LoadBalancerEnabled, "true"]
+  AutoScalingEnabledCondition: !Equals [!Ref AutoScalingEnabled, "true"]
+  LoadBalancerDisabledCondition: !Not [!Condition LoadBalancerEnabledCondition]
+  UsePrivateRepo: !Equals [ !Ref IsPrivateRepo, "true" ]
+
+Resources:
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup  
     Properties:
@@ -68,7 +219,10 @@ Resources:
             FromPort: 80
             ToPort: 80
             CidrIp: 0.0.0.0/0
-
+          - IpProtocol: tcp
+            FromPort: !Ref App1Port
+            ToPort: !Ref App1Port
+            CidrIp: 0.0.0.0/0
 
   ECSCluster:
     Type: AWS::ECS::Cluster
@@ -78,7 +232,6 @@ Resources:
   ECSExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: ecsTaskExecutionRole
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -88,7 +241,32 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-
+      Policies:
+        - PolicyName: CloudWatchLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource:
+                  - !Sub "arn:aws:logs:*:${AWS::AccountId}:log-group:/ecs/${ClusterName}:*"
+                  - !Sub "arn:aws:logs:*:${AWS::AccountId}:log-group:/ecs/${ClusterName}"
+        - PolicyName: AllowSecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - arn:aws:secretsmanager:us-east-1:144571874415:secret:*
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -101,35 +279,200 @@ Resources:
         - FARGATE
       ExecutionRoleArn: !GetAtt ECSExecutionRole.Arn
       ContainerDefinitions:
-        - Name: WebServer
-          Image: !Ref  Image1
-          Essential: true
-          PortMappings:
-            - ContainerPort: !Ref App1Port
-              Protocol: tcp
+      - Name: WebServer  # backend
+        Image: !Ref Image1
+        Essential: true
+        Cpu: !Ref CpuContainer1
+        Memory: !Ref MemoryContainer1
+        RepositoryCredentials:
+          Fn::If:
+            - UsePrivateRepo
+            - CredentialsParameter: !Ref CredetialRepository
+            - Ref: AWS::NoValue
+          
+        PortMappings:
+          - ContainerPort: !Ref App1Port  # ej: 3000
+            Protocol: tcp
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Sub "/ecs/${ClusterName}"
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: "webserver"
+            awslogs-create-group: "true"
+            
+        Environment:
+          - Name: !Sub "${DatabaseEngine}_HOST"
+            Value: !Ref DatabaseHost
+          - Name: !Sub "${DatabaseEngine}_PORT"
+            Value: !Ref DatabasePort
+          - Name: !Sub "${DatabaseEngine}_DATABASE"
+            Value: !Ref DatabaseName
+          - Name: !Sub "${DatabaseEngine}_USER"
+            Value: !Ref DatabaseUser
+          - Name: !Sub "${DatabaseEngine}_PASSWORD"
+            Value: !Ref DatabasePassword
+          - Name: BACKEND_URL
+            Value:
+              Fn::If:
+                - LoadBalancerEnabledCondition
+                - !GetAtt ECSALB.DNSName
+                - "localhost"
+          - Name: DATABASE_ENGINE
+            Value: !Ref DatabaseEngine
+          - Name: DB_HOST
+            Value: !Ref DatabaseHost
+          - Name: DB_PORT
+            Value: !Ref DatabasePort
+          - Name: DB_NAME
+            Value: !Ref DatabaseName
+          - Name: DB_USER
+            Value: !Ref DatabaseUser
+          - Name: DB_PASSWORD
+            Value: !Ref DatabasePassword
+          # Para compatibilidad con Postgres oficial
+          - Name: POSTGRES_DB
+            Value: !Ref DatabaseName
+          - Name: POSTGRES_USER
+            Value: !Ref DatabaseUser
+          - Name: POSTGRES_PASSWORD
+            Value: !Ref DatabasePassword
 
-        - Name: Website
-          Essential: true
-          Image: !Ref Image2
-          PortMappings:
-            - ContainerPort: !Ref App2Port
-              Protocol: tcp
+      - Name: Website  # frontend
+        Image: !Ref Image2
+        Essential: true
+        Cpu: !Ref CpuContainer2
+        Memory: !Ref MemoryContainer2
+        RepositoryCredentials:
+          Fn::If:
+            - UsePrivateRepo
+            - CredentialsParameter: !Ref CredetialRepository
+            - Ref: AWS::NoValue
+            
+        Environment:
+          - Name: NEXT_PUBLIC_BACKEND_URL
+            Value:
+              Fn::If:
+                - LoadBalancerEnabledCondition
+                - !GetAtt ECSALB.DNSName
+                - "localhost"
 
-        - Name: DataBase
-          Essential: true
-          Image: !Ref Image3
-          PortMappings:
-            - ContainerPort: !Ref App3Port
-              Protocol: tcp
+        PortMappings:
+          - ContainerPort: !Ref App2Port # ej: 80
+            HostPort: !Ref App2Port
+            Protocol: tcp
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Sub "/ecs/${ClusterName}"
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: "website"
+            awslogs-create-group: "true"
+
+      - Name: db
+        Image: !Ref Image3
+        Essential: true
+        Cpu: !Ref CpuContainer3
+        Memory: !Ref MemoryContainer3
+        PortMappings:
+          - ContainerPort: !Ref App3Port
+            Protocol: tcp
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Sub "/ecs/${ClusterName}"
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: "database"
+            awslogs-create-group: "true"
+        
+        Environment:
+          - Name: !Sub "${DatabaseEngine}_HOST"
+            Value: localhost
+          - Name: !Sub "${DatabaseEngine}_PORT"
+            Value: !Ref DatabasePort
+          - Name: !Sub "${DatabaseEngine}_DATABASE"
+            Value: !Ref DatabaseName
+          - Name: !Sub "${DatabaseEngine}_USER"
+            Value: !Ref DatabaseUser
+          - Name: !Sub "${DatabaseEngine}_PASSWORD"
+            Value: !Ref DatabasePassword
+          - Name: !Sub "${DatabaseEngine}_ROOT_PASSWORD"
+            Value: !Ref DatabaseRootPassword
+          # Para compatibilidad con Postgres oficial
+          - Name: POSTGRES_DB
+            Value: !Ref DatabaseName
+          - Name: POSTGRES_USER
+            Value: !Ref DatabaseUser
+          - Name: POSTGRES_PASSWORD
+            Value: !Ref DatabasePassword
+          # Para compatibilidad con MySQL oficial
+          - Name: MYSQL_DATABASE
+            Value: !Ref DatabaseName
+          - Name: MYSQL_USER
+            Value: !Ref DatabaseUser
+          - Name: MYSQL_PASSWORD
+            Value: !Ref DatabasePassword
+          - Name: MYSQL_ROOT_PASSWORD
+            Value: !Ref DatabaseRootPassword
+
+  ECSALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Condition: LoadBalancerEnabledCondition
+    Properties:
+      Subnets:
+        - !Ref PublicSubnetId
+        - !Ref PublicSubnetId2 
+      SecurityGroups:
+        - !Ref InstanceSecurityGroup
+      Scheme: internet-facing
+
+  ECSALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: LoadBalancerEnabledCondition
+    Properties:
+      LoadBalancerArn: !Ref ECSALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref FETargetGroup
+
+  ECSALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: LoadBalancerEnabledCondition
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref BETargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/*
+            - /media/*
+            - /static/*
+      ListenerArn: !Ref ECSALBListener
+      Priority: 1
+
 
   ECSService:
     Type: AWS::ECS::Service
-    DependsOn: ECSCluster
+    DependsOn:
+      - ECSCluster
+      - TaskDefinition
     Properties:
       Cluster: !Ref ECSCluster
       LaunchType: FARGATE
-      DesiredCount: 3
+      ServiceName: !Ref ECSServiceName
+      DesiredCount: !Ref DesiredTaskCount
       TaskDefinition: !Ref TaskDefinition
+      HealthCheckGracePeriodSeconds:
+        Fn::If:
+          - LoadBalancerEnabledCondition
+          - 120
+          - !Ref AWS::NoValue
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 50
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
@@ -137,6 +480,96 @@ Resources:
             - !Ref PublicSubnetId
           SecurityGroups:
             - !Ref InstanceSecurityGroup
+      LoadBalancers:
+        Fn::If:
+          - LoadBalancerEnabledCondition
+          - - ContainerName: Website
+              ContainerPort: !Ref App2Port
+              TargetGroupArn: !Ref FETargetGroup
+            - ContainerName: WebServer
+              ContainerPort: !Ref App1Port
+              TargetGroupArn: !Ref BETargetGroup
+          - !Ref AWS::NoValue
+
+
+  FETargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: LoadBalancerEnabledCondition
+    Properties:
+      VpcId: !Ref VPCId
+      Protocol: HTTP
+      Port: !Ref App2Port
+      TargetType: ip
+      HealthCheckPath: /
+      Matcher:
+        HttpCode: 200-399
+      HealthCheckIntervalSeconds: !Ref HealthCheckInterval
+      HealthCheckTimeoutSeconds: !Ref HealthCheckTimeout
+      HealthyThresholdCount: !Ref HealthCheckRetries
+      UnhealthyThresholdCount: !Ref HealthCheckRetries
+
+  BETargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: LoadBalancerEnabledCondition
+    Properties:
+      VpcId: !Ref VPCId
+      Protocol: HTTP
+      Port: !Ref App1Port
+      TargetType: ip
+      HealthCheckPath: !Ref HealthCheckPath
+      Matcher:
+        HttpCode: 200-399
+      HealthCheckIntervalSeconds: !Ref HealthCheckInterval
+      HealthCheckTimeoutSeconds: !Ref HealthCheckTimeout
+      HealthyThresholdCount: !Ref HealthCheckRetries
+      UnhealthyThresholdCount: !Ref HealthCheckRetries
+
+  ECSAutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: AutoScalingEnabledCondition
+    DependsOn: ECSService
+    Properties:
+      MaxCapacity: !Ref MaxCapacity
+      MinCapacity: !Ref MinCapacity
+      ResourceId: !Sub "service/${ClusterName}/${ECSServiceName}"
+      RoleARN: !GetAtt ECSExecutionRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  ECSAutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: AutoScalingEnabledCondition
+    Properties:
+      PolicyName: ECSAutoScalingPolicy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSAutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 90.0
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+
+  ECSAutoScalingMemoryPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: AutoScalingEnabledCondition
+    Properties:
+      PolicyName: ECSAutoScalingMemoryPolicy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ECSAutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 90.0
+        CustomizedMetricSpecification:
+          MetricName: MemoryUtilization
+          Namespace: AWS/ECS
+          Statistic: Average
+          Dimensions:
+            - Name: ServiceName
+              Value: !Ref ECSServiceName
+            - Name: ClusterName
+              Value: !Ref ClusterName
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
 
 Outputs:
   ServiceCluster:
@@ -145,4 +578,9 @@ Outputs:
 
   ECSServiceName:
     Description: Nombre del servicio ECS creado
-    Value: !Ref ECSService
+    Value: !Ref ECSServiceName
+
+  LoadBalancerURL:
+    Description: URL del Load Balancer (si está habilitado)
+    Value: !If [LoadBalancerEnabledCondition, !GetAtt ECSALB.DNSName, "Load Balancer no habilitado"]
+    Condition: LoadBalancerEnabledCondition 

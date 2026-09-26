@@ -40,6 +40,17 @@ class Deployment(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='deployments')
     name = models.CharField(max_length=255)
+    service = models.CharField(max_length=15, blank=True, null=True)
+    domain_name = models.CharField(max_length=255, blank=True, null=True, help_text="Domain name for the deployment")
+    regions = models.JSONField( default=list,
+        help_text="List of Docker images in format [{'name': 'image_name', 'tag': 'latest', 'port': 80, 'registry_url': 'docker.io', 'repository_name': 'my_repo'}]",
+        blank=True,)
+    deployment_url = models.CharField(max_length=500, blank=True)
+    region_urls = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of {region, url} per deployed region"
+    )
     # docker_image = models.ForeignKey(DockerImage, on_delete=models.PROTECT, blank=True, null=True, related_name='deployments')
     docker_images = models.JSONField(
         default=list,
@@ -58,10 +69,13 @@ class Deployment(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
 
+    # Lambda config — stores runtime, handler, codeFiles, etc. for the last deployed version
+    lambda_config = models.JSONField(default=dict, blank=True, null=True)
+
     # AWS ECS Fargate specific fields
     aws_task_arn = models.CharField(max_length=255, null=True, blank=True)
-    aws_cluster_arn = models.CharField(max_length=255, null=True, blank=True)
-    aws_service_arn = models.CharField(max_length=255, null=True, blank=True)
+    aws_cluster_arn = models.CharField(max_length=550, null=True, blank=True)
+    aws_service_arn = models.CharField(max_length=550, null=True, blank=True)
     aws_region = models.CharField(max_length=50, default='us-east-1')
     
 
@@ -100,16 +114,17 @@ class Deployment(models.Model):
         null=True   
     )
     
-    # network_mode = models.CharField(
-    #     max_length=20,
-    #     default='awsvpc',
-    #     choices=[
-    #         ('awsvpc', 'awsvpc'),
-    #         ('bridge', 'bridge'),
-    #         ('host', 'host'),
-    #         ('none', 'none')
-    #     ]
-    # )
+    network_mode = models.CharField(
+        max_length=20,
+        default='awsvpc',
+        choices=[
+            ('awsvpc', 'awsvpc'),
+            ('bridge', 'bridge'),
+            ('host', 'host'),
+            ('none', 'none')
+        ]
+    )
+    load_balancer = models.BooleanField(default=False, help_text="Whether to attach a load balancer to the service")
     # # Container configuration
     # container_name = models.CharField(max_length=255, default='app')
     # command = models.JSONField(
@@ -149,6 +164,16 @@ class Deployment(models.Model):
     #     default=list,
     #     help_text="List of scheduled scaling actions in format [{'schedule': 'cron(0 8 * * ? *)', 'min_capacity': 2, 'max_capacity': 10}]"
     # )
+
+
+
+
+    #  'id', 'name', 'docker_image', 'status', 'status_details',
+    #         'created_at', 'updated_at', 'cpu_units', 'memory_mb',
+    #          'command', 'entrypoint', 'port_mappings',
+    #         'network_mode', 'environment_variables', 'secrets',
+    #         'volumes', 'health_check', 'desired_count', 'min_count',
+    #         'max_count'
     
     class Meta:
         ordering = ['-created_at']

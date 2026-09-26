@@ -2,20 +2,25 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    # Docker Images URLs
-    path('images/', views.list_docker_images, name='list-docker-images'),
-    path('images/create/', views.create_docker_image, name='create-docker-image'),
-    path('images/<int:image_id>/', views.get_docker_image, name='get-docker-image'),
-    path('images/<int:image_id>/update/', views.update_docker_image, name='update-docker-image'),
-    path('images/<int:image_id>/delete/', views.delete_docker_image, name='delete-docker-image'),
-    path('images/<int:image_id>/validate/', views.validate_docker_image, name='validate-docker-image'),
-    path('images/<int:image_id>/details/', views.get_docker_image_details, name='get-docker-image-details'),
+    # # Docker Images URLs
+    # path('images/', views.list_docker_images, name='list-docker-images'),
+    # path('images/create/', views.create_docker_image, name='create-docker-image'),
+    # path('images/<int:image_id>/', views.get_docker_image, name='get-docker-image'),
+    # # path('images/<int:image_id>/update/', views.update_docker_image, name='update-docker-image'),
+    # path('images/<int:image_id>/delete/', views.delete_docker_image, name='delete-docker-image'),
+    # path('images/<int:image_id>/validate/', views.validate_docker_image, name='validate-docker-image'),
+    # path('images/<int:image_id>/details/', views.get_docker_image_details, name='get-docker-image-details'),
+    
+    # Domain management URLs
+    path('check-domain/', views.check_domain_availability, name='check-domain-availability'),
+    path('purchase-domain/', views.purchase_domain, name='purchase-domain'),
     
     # Deployments URLs
     path('deployments/', views.list_deployments, name='list-deployments'),
     path('deployments/create/', views.create_deployment, name='create-deployment'),
     path('deployments/<int:deployment_id>/', views.get_deployment, name='get-deployment'),
     path('deployments/<int:deployment_id>/update/', views.update_deployment, name='update-deployment'),
+    path('deployments/<int:deployment_id>/redeploy/', views.redeploy_ecs, name='redeploy-ecs'),
     path('deployments/<int:deployment_id>/delete/', views.delete_deployment, name='delete-deployment'),
     path('deployments/<int:deployment_id>/scale/', views.scale_deployment, name='scale-deployment'),
     path('deployments/<int:deployment_id>/stop/', views.stop_deployment, name='stop-deployment'),
@@ -23,4 +28,11 @@ urlpatterns = [
     path('deployments/<int:deployment_id>/logs/', views.get_deployment_logs, name='get-deployment-logs'),
     path('deployments/<int:deployment_id>/metrics/', views.get_deployment_metrics, name='get-deployment-metrics'),
     path('deployments/<int:deployment_id>/status/', views.get_deployment_status, name='get-deployment-status'),
-] 
+    path('lambda/functions/', views.list_lambda_functions, name='list-lambda-functions'),
+    path('lambda/functions/<int:deployment_id>/update/', views.update_lambda_function, name='update-lambda-function'),
+    path('lambda/functions/<int:deployment_id>/logs/', views.get_lambda_logs, name='get-lambda-logs'),
+    path('lambda/functions/<int:deployment_id>/metrics/', views.get_lambda_metrics, name='get-lambda-metrics'),
+    path('dockerhub/login/', views.dockerhub_login, name='dockerhub-login'),
+    path('dockerhub/repositories/', views.dockerhub_repositories, name='dockerhub-repositories'),
+    path('dockerhub/tags/', views.dockerhub_tags, name='dockerhub-tags'),
+]
